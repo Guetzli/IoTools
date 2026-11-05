@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notenscan-Nachbearbeitung</title>
+<style>
+:root{--bg:#f4f4f2;--panel:#fff;--fg:#222;--muted:#777;--line:#d8d8d4;--acc:#2a6df4;--accfg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1d1f;--panel:#2a2a2d;--fg:#e8e8e8;--muted:#999;--line:#444;--acc:#5b8cff;--accfg:#fff}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif}
+#main{display:grid;grid-template-columns:250px 1fr 300px;height:100vh}
+aside{background:var(--panel);overflow:auto;padding:10px}
+#left{border-right:1px solid var(--line)}
+#right{border-left:1px solid var(--line)}
+h3{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+h3:first-child{margin-top:0}
+button,select,input[type=number]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+button{cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+button:disabled{opacity:.4;cursor:default}
+.row{display:flex;gap:6px;align-items:center;margin:5px 0;flex-wrap:wrap}
+.row label{flex:1;min-width:90px}
+.row input[type=number]{width:80px}
+.btns button{flex:1}
+#thumbs{display:grid;grid-template-columns:1fr 1fr;gap:10px 8px;margin-top:8px;align-items:start}
+.thumb{border:2px solid transparent;border-radius:4px;cursor:pointer;position:relative;line-height:0;user-select:none}
+.thumb.sel{border-color:var(--acc)}
+.thumb.cur{box-shadow:0 0 0 2px var(--acc)}
+.thumb canvas{width:100%;display:block;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.thumb span{position:absolute;left:4px;top:2px;font-size:11px;line-height:1.2;background:rgba(0,0,0,.55);color:#fff;border-radius:3px;padding:0 4px}
+#stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px;min-width:0;min-height:0;position:relative}
+#views{display:flex;gap:14px;align-items:flex-start;justify-content:center}
+.pv{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.35);cursor:grab;touch-action:none}
+.pv.drag{cursor:grabbing}
+.pv.empty{background:transparent;box-shadow:none;outline:2px dashed var(--line);cursor:default}
+.pv.sel{outline:2px solid var(--acc);outline-offset:2px}
+.pv.cur{outline:4px solid var(--acc);outline-offset:2px}
+#rotWrap{display:flex;align-items:center;gap:8px}
+#rot{flex:1;min-width:0}
+#rotVal{width:64px;text-align:right;font-variant-numeric:tabular-nums}
+#empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);pointer-events:none;padding:30px}
+#status{font-size:12px;color:var(--muted);min-height:1.4em;margin-top:8px}
+body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
+.hint{font-size:12px;color:var(--muted)}
+@media(max-width:900px){#main{grid-template-columns:1fr;grid-template-rows:auto 70vh auto;height:auto}}
+</style>
+</head>
+<body>
+<div id="main">
+  <aside id="left">
+    <h3>Seiten</h3>
+    <div class="row btns">
+      <button id="bLeft" title="Seite nach vorn">◀</button>
+      <button id="bRight" title="Seite nach hinten">▶</button>
+      <button id="bDel" title="Markierte Seiten entfernen">✕</button>
+    </div>
+    <p class="hint">Klick wählt eine Seite, Shift einen Bereich, Strg/Cmd einzelne Seiten dazu.</p>
+    <div id="thumbs"></div>
+  </aside>
+
+  <section id="stage">
+    <div id="empty">Scans (PDF oder Bilder) hierher ziehen<br>oder rechts «Dateien öffnen» wählen.</div>
+    <div id="views">
+      <canvas id="cvL" class="pv" width="10" height="10"></canvas>
+      <canvas id="cvR" class="pv" width="10" height="10"></canvas>
+    </div>
+    <div id="rotWrap">
+      <button id="rM" title="Regler nach links">◀</button>
+      <input id="rot" type="range" min="-3" max="3" step="0.01" value="0">
+      <button id="rP" title="Regler nach rechts">▶</button>
+      <span id="rotVal">0,00°</span>
+      <button id="rReset" title="Drehung zurücksetzen">0</button>
+    </div>
+  </section>
+
+  <aside id="right">
+    <h3>Dateien</h3>
+    <div class="row"><button id="bOpen" class="primary">Dateien öffnen …</button></div>
+    <input id="file" type="file" accept="application/pdf,image/*" multiple hidden>
+    <label class="row"><input type="checkbox" id="cAutoLoad" checked> Beim Laden automatisch bearbeiten</label>
+    <label class="row"><input type="checkbox" id="cDual" checked> Doppelseite anzeigen</label>
+
+    <h3>Alle Seiten gleich</h3>
+    <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" value="100"></div>
+    <div class="row"><label>Breite zusätzlich (%)</label><input id="gStx" type="number" step="0.5" value="0"></div>
+    <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
+
+    <h3>Automatik</h3>
+    <div class="row btns"><button id="aAll" class="primary">Alles automatisch</button></div>
+    <div class="row btns"><button id="aRot">Gerade drehen</button><button id="aScale">Grösse</button><button id="aAlign">Ausrichten</button></div>
+    <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
+    <p class="hint">«Grösse»: Der Faktor wird an der grössten der mittleren Seite(n) bestimmt (bei 10 Seiten Seite 5 und 6), sodass der Inhalt in die Fläche innerhalb des Rands passt, und gilt für alle Seiten. Hat der Inhalt in einer Dimension Luft, wird er dort zusätzlich um höchstens 10 % gestreckt. Eigene Werte kannst du oben in «Alle Seiten gleich» eintragen.</p>
+
+    <h3>Seiten drehen / skalieren</h3>
+    <div class="row"><label>Seiten</label>
+      <select id="gSel">
+        <option value="sel">Markierte Seiten</option>
+        <option value="odd">Ungerade (1, 3, 5 …)</option>
+        <option value="even">Gerade (2, 4, 6 …)</option>
+        <option value="all">Alle</option>
+      </select></div>
+    <div class="row btns"><button data-q="0">0°</button><button data-q="90">90°</button><button data-q="180">180°</button><button data-q="270">270°</button></div>
+    <div class="row"><label>Grösse (%)</label><input id="gGK" type="number" step="0.5" min="10" value="100"></div>
+    <p class="hint">Drehung im Uhrzeigersinn, Grösse relativ zum gemeinsamen Faktor. Nach dem Drehen «Gerade drehen» und «Ausrichten» erneut ausführen. Die Seitenzahl zählt von der Liste links.</p>
+
+    <h3>Markierte Seiten</h3>
+    <div class="row"><label>Grösse (%)</label><input id="pK" type="number" step="0.5" min="10" value="100"></div>
+    <p class="hint">100 % = gemeinsamer Faktor. Gilt zusätzlich für alle markierten Seiten.</p>
+    <div class="row btns"><button id="bReset">Zurücksetzen</button></div>
+    <div class="row"><label>Verschieben wirkt auf</label>
+      <select id="dSel">
+        <option value="sel">Markierte Seiten</option>
+        <option value="odd">Alle ungeraden</option>
+        <option value="even">Alle geraden</option>
+        <option value="all">Alle Seiten</option>
+      </select></div>
+    <p class="hint">Der rot gestrichelte Rahmen zeigt den Rand. Alles ausserhalb wird weiss und auch im Export entfernt. Inhalt mit der Maus ziehen. Pfeiltasten verschieben um 0,2 mm (mit Shift 1 mm). Der Regler unter den Seiten dreht um ±3° (bei mehreren Seiten werden alle gleich weitergedreht).</p>
+
+    <h3>Seiten einfügen</h3>
+    <div class="row btns"><button id="bBlank">Leere Seite davor</button><button id="bDup">Duplizieren</button></div>
+
+    <h3>Weisse Rechtecke</h3>
+    <div class="row btns"><button id="bRectMode">Rechtecke ziehen: aus</button></div>
+    <div class="row btns"><button id="bRectDel">Rechteck löschen</button><button id="bRectClear">Alle löschen</button></div>
+    <p class="hint">Bei «ein» ziehst du auf einer Seite Rechtecke auf, die den Inhalt verdecken. Pro Seite sind beliebig viele möglich. Ein Klick wählt ein Rechteck (rot), Entf oder «Rechteck löschen» entfernt es, ohne Auswahl das zuletzt gezogene. Die Rechtecke wandern mit dem Seiteninhalt mit.</p>
+
+    <h3>Export</h3>
+    <div class="row"><label>Modus</label>
+      <select id="eMode">
+        <option value="png">Original (PNG, verlustfrei)</option>
+        <option value="jpg">Original (JPEG 95 %)</option>
+        <option value="small">Verkleinert</option>
+      </select></div>
+    <div class="row" id="eSmall" hidden><label>Auflösung</label>
+      <select id="eDpi"><option>100</option><option>150</option><option selected>200</option><option>300</option></select></div>
+    <div class="row" id="eSmallQ" hidden><label>JPEG-Qualität</label>
+      <select id="eQ"><option value="0.6">60 %</option><option value="0.75" selected>75 %</option><option value="0.85">85 %</option></select></div>
+    <p class="hint">Der Export rechnet jede Seite aus dem Originalscan neu auf A4. Was ausserhalb von A4 liegt, ist danach nicht mehr in der PDF enthalten. «Original» nutzt die Scan-Auflösung.</p>
+    <div class="row btns"><button id="bExport" class="primary" disabled>Als A4-PDF speichern</button></div>
+    <div id="status"></div>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const rad = d => d * Math.PI / 180;
+const A4W = 210, A4H = 297;
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const pages = [];
+let cur = -1;                 // aktive Seite (Index)
+let selSet = new Set();       // markierte Seiten (Seitenobjekte)
+let anchor = 0;               // Ankerseite für Shift-Auswahl
+const G = { scale: 100, stx: 0, sty: 0 };
+let rectMode = false, rubber = null, selRect = null;   // weisse Rechtecke
+
+function setStatus(t) { $('status').textContent = t; }
+
+/* ---------- Laden ---------- */
+// Die Canvas-Bilder sind nur Vorschau und Analyse. Der Export lädt die Originaldaten (p.src) in voller Auflösung neu.
+const PREV_LONG = 2200;
+
+function makePage(c, name, src) {
+  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, rects: [], aspect: c.height / c.width, ink: null, thumb: null };
+  analyze(p);
+  pages.push(p);
+  return p;
+}
+
+async function addImage(f) {
+  const bytes = await f.arrayBuffer();
+  const bmp = await createImageBitmap(new Blob([bytes]));
+  const s = Math.min(1, PREV_LONG / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close && bmp.close();
+  makePage(c, f.name, { kind: 'img', bytes });
+}
+
+// grösste eingebettete Bildbreite einer PDF-Seite (um die Scan-Auflösung zu erkennen)
+async function pdfImageWidth(pg) {
+  try {
+    const ops = await pg.getOperatorList(), O = pdfjsLib.OPS;
+    let best = 0;
+    ops.fnArray.forEach((fn, i) => {
+      if (fn === O.paintImageXObject || fn === O.paintInlineImageXObject || fn === O.paintImageMaskXObject) {
+        const a = ops.argsArray[i];
+        const w = (a[0] && typeof a[0] === 'object') ? a[0].width : a[1];
+        if (w > best) best = w;
+      }
+    });
+    return best;
+  } catch (e) { return 0; }
+}
+
+async function addPdf(f) {
+  if (!window.pdfjsLib) throw new Error('pdf.js konnte nicht geladen werden (Internet?)');
+  const bytes = await f.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  for (let i = 1; i <= doc.numPages; i++) {
+    setStatus(`${f.name}: Seite ${i}/${doc.numPages} …`);
+    const pg = await doc.getPage(i);
+    const v1 = pg.getViewport({ scale: 1 });
+    const sc = PREV_LONG / Math.max(v1.width, v1.height);
+    const vp = pg.getViewport({ scale: sc });
+    const c = document.createElement('canvas');
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    await pg.render({ canvasContext: x, viewport: vp }).promise;
+    makePage(c, `${f.name} S.${i}`, { kind: 'pdf', bytes, index: i - 1, pxW: await pdfImageWidth(pg) });
+    await new Promise(r => setTimeout(r));
+  }
+}
+
+async function addFiles(list) {
+  const coll = new Intl.Collator(undefined, { numeric: true });
+  const files = [...list].sort((a, b) => coll.compare(a.name, b.name));
+  const first = pages.length;
+  document.body.style.cursor = 'progress';
+  for (const f of files) {
+    try {
+      if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) await addPdf(f);
+      else if (f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name)) await addImage(f);
+      else setStatus('Nicht unterstützt: ' + f.name);
+    } catch (e) { console.error(e); setStatus('Fehler bei ' + f.name + ': ' + e.message); }
+  }
+  document.body.style.cursor = '';
+  if (pages.length > first) {
+    if ($('cAutoLoad').checked) autoAll(first);
+    selectOnly(first);
+    setStatus(`${pages.length} Seite(n) geladen.`);
+  }
+  rebuildThumbs(); syncUI(); draw();
+}
+
+/* ---------- Auswahl ---------- */
+function selectOnly(i) { cur = i; selSet = new Set(pages[i] ? [pages[i]] : []); anchor = i; }
+function ensureSel() {
+  if (!pages.length) { cur = -1; selSet = new Set(); return; }
+  cur = Math.max(0, Math.min(cur, pages.length - 1));
+  selSet = new Set([...selSet].filter(p => pages.includes(p)));
+  if (!selSet.size) selSet.add(pages[cur]);
+  if (!selSet.has(pages[cur])) cur = pages.indexOf([...selSet][0]);
+}
+// Klick auf Seite i (Liste oder Ansicht): Shift = Bereich, Strg/Cmd = hinzufügen/abwählen
+function clickPage(i, e, fromView) {
+  const p = pages[i]; if (!p) return false;
+  if (e.shiftKey) {
+    const a = Math.min(anchor, i), b = Math.max(anchor, i);
+    selSet = new Set(pages.slice(a, b + 1)); cur = i;
+  } else if (e.ctrlKey || e.metaKey) {
+    if (selSet.has(p) && selSet.size > 1) {
+      selSet.delete(p);
+      if (cur === i) cur = pages.indexOf(pages.find(q => selSet.has(q)));
+    } else { selSet.add(p); cur = i; }
+    anchor = i;
+  } else if (fromView && selSet.has(p) && selSet.size > 1) {
+    cur = i;   // Mehrfachauswahl bleibt beim Ziehen in der Ansicht erhalten
+  } else { selectOnly(i); }
+  selRect = null;
+  syncUI(); draw();
+  return !(e.shiftKey || e.ctrlKey || e.metaKey);
+}
+
+// Seiten einer Gruppe: Seitenzahl zählt ab 1 in Listenreihenfolge
+function targetsFor(sel) {
+  if (sel === 'sel') { const t = pages.filter(p => selSet.has(p)); return t.length ? t : (pages[cur] ? [pages[cur]] : []); }
+  return pages.filter((_, i) => sel === 'all' || (sel === 'odd' ? i % 2 === 0 : i % 2 === 1));
+}
+
+/* ---------- Geometrie ---------- */
+function factors(p) {
+  const k = G.scale / 100 * p.k, odd = p.q % 180 !== 0;
+  // Breite/Höhe-Streckung gelten für die Seite; bei 90°/270° liegen die Bildachsen vertauscht
+  return odd
+    ? { fx: A4W * k * (1 + G.sty / 100) / p.aspect, fy: A4W * k * (1 + G.stx / 100) }
+    : { fx: A4W * k * (1 + G.stx / 100), fy: A4W * k * (1 + G.sty / 100) * p.aspect };
+}
+
+// Bildkoordinaten -> Seite: Verschiebung, Drehung (grob + fein), Skalierung in Bildachsen
+function setPageTransform(ctx, p, ppm, img) {
+  const W = A4W * ppm, H = A4H * ppm, odd = p.q % 180 !== 0;
+  // Nach der Drehung bestimmt die waagrechte Seitenausdehnung den Grundmassstab (bei 90°/270° die Bildhöhe)
+  const k = G.scale / 100 * p.k, base = A4W * ppm / (odd ? img.height : img.width);
+  ctx.translate(W / 2 + p.dx * ppm, H / 2 + p.dy * ppm);
+  ctx.rotate(rad(p.rot + p.q));
+  ctx.scale(base * k * (1 + (odd ? G.sty : G.stx) / 100), base * k * (1 + (odd ? G.stx : G.sty) / 100));
+}
+
+// Punkt (u,v) in Bildkoordinaten (0..1) innerhalb eines konvexen Vierecks?
+function inPoly(r, u, v) {
+  let pos = false, neg = false;
+  for (let i = 0; i < 4; i++) {
+    const a = r[i], b = r[(i + 1) % 4], c = (b[0] - a[0]) * (v - a[1]) - (b[1] - a[1]) * (u - a[0]);
+    if (c > 0) pos = true; else if (c < 0) neg = true;
+  }
+  return !(pos && neg);
+}
+// Seitenpunkt (mm relativ zur Seitenmitte) -> Bildkoordinaten (0..1)
+function mmToUV(p, X, Y) {
+  X -= p.dx; Y -= p.dy;
+  const a = -rad(p.rot + p.q), c = Math.cos(a), s = Math.sin(a), { fx, fy } = factors(p);
+  return [0.5 + (X * c - Y * s) / fx, 0.5 + (X * s + Y * c) / fy];
+}
+
+function renderPage(ctx, p, ppm, img) {
+  const W = A4W * ppm, H = A4H * ppm;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  setPageTransform(ctx, p, ppm, img);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  // Weisse Rechtecke (im Bildkoordinatensystem, wandern also mit dem Inhalt)
+  if (p.rects && p.rects.length) {
+    ctx.fillStyle = '#fff';
+    for (const r of p.rects) {
+      ctx.beginPath();
+      r.forEach(([u, v], i) => { const x = (u - .5) * img.width, y = (v - .5) * img.height; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
+  // Alles ausserhalb des Rands weiss machen (entfernt Scan-Schatten, gilt auch im Export)
+  const m = margin() * ppm;
+  if (m > 0) {
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, m); ctx.fillRect(0, H - m, W, m);
+    ctx.fillRect(0, 0, m, H); ctx.fillRect(W - m, 0, m, H);
+    ctx.restore();
+  }
+}
+const margin = () => Math.max(0, parseFloat(document.getElementById('mR').value) || 0);
+
+/* ---------- Analyse ---------- */
+function analyze(p) {
+  const c = p.prev, sc = Math.min(1, 1500 / c.width);
+  const w = Math.max(1, Math.round(c.width * sc)), h = Math.max(1, Math.round(c.height * sc));
+  const t = document.createElement('canvas'); t.width = w; t.height = h;
+  const x = t.getContext('2d', { willReadFrequently: true });
+  x.fillStyle = '#fff'; x.fillRect(0, 0, w, h);
+  x.drawImage(c, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data;
+  const g = new Uint8Array(w * h), hist = new Uint32Array(256);
+  for (let i = 0; i < w * h; i++) {
+    const v = (d[4 * i] * 0.299 + d[4 * i + 1] * 0.587 + d[4 * i + 2] * 0.114) | 0;
+    g[i] = v; hist[v]++;
+  }
+  const tot = w * h; let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let wB = 0, sB = 0, best = -1, thr = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i]; if (!wB) continue;
+    const wF = tot - wB; if (!wF) break;
+    sB += i * hist[i];
+    const mB = sB / wB, mF = (sum - sB) / wF, bw = wB * wF * (mB - mF) * (mB - mF);
+    if (bw > best) { best = bw; thr = i; }
+  }
+  // Tintenmaske; zusammenhängende dunkle Flächen, die den Bildrand berühren (Scan-Schatten), werden entfernt
+  const mk = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) mk[i] = g[i] <= thr ? 1 : 0;
+  const stack = [];
+  const seed = i => { if (mk[i] === 1) { mk[i] = 0; stack.push(i); } };
+  for (let xx = 0; xx < w; xx++) for (let t2 = 0; t2 < 2; t2++) { seed(t2 * w + xx); seed((h - 1 - t2) * w + xx); }
+  for (let yy = 0; yy < h; yy++) for (let t2 = 0; t2 < 2; t2++) { seed(yy * w + t2); seed(yy * w + (w - 1 - t2)); }
+  while (stack.length) {
+    const i = stack.pop(), xx = i % w, yy = (i / w) | 0;
+    if (xx > 0) seed(i - 1);
+    if (xx < w - 1) seed(i + 1);
+    if (yy > 0) seed(i - w);
+    if (yy < h - 1) seed(i + w);
+  }
+  const mx = Math.round(w * 0.01), my = Math.round(h * 0.01);
+  let n = 0;
+  for (let yy = my; yy < h - my; yy++) for (let xx = mx; xx < w - mx; xx++) if (mk[yy * w + xx] === 1) n++;
+  const stride = Math.max(1, Math.floor(n / 150000));
+  const pts = new Float32Array(2 * Math.ceil(n / stride) + 2);
+  let k = 0, c2 = 0;
+  for (let yy = my; yy < h - my; yy++) for (let xx = mx; xx < w - mx; xx++) {
+    if (mk[yy * w + xx] === 1 && (c2++ % stride) === 0) { pts[k++] = (xx + .5) / w; pts[k++] = (yy + .5) / h; }
+  }
+  p.ink = pts.subarray(0, k);
+}
+
+// Tintenpunkte in mm relativ zur Seitenmitte (Seitendrehung q angewendet, feine Drehung noch nicht)
+function inkMm(p) {
+  const { fx, fy } = factors(p), rects = p.rects || [];
+  const all = p.ink.length / 2;
+  const X = new Float32Array(all), Y = new Float32Array(all);
+  const [qc, qs] = { 0: [1, 0], 90: [0, 1], 180: [-1, 0], 270: [0, -1] }[p.q];
+  let n = 0;
+  for (let i = 0; i < all; i++) {
+    const u = p.ink[2 * i], v = p.ink[2 * i + 1];
+    if (rects.length && rects.some(r => inPoly(r, u, v))) continue;   // verdeckte Stellen zählen nicht
+    const x0 = (u - .5) * fx, y0 = (v - .5) * fy;
+    X[n] = x0 * qc - y0 * qs; Y[n] = x0 * qs + y0 * qc; n++;
+  }
+  return { X: X.subarray(0, n), Y: Y.subarray(0, n), n };
+}
+
+function detectAngle(p) {
+  const { X, Y, n } = inkMm(p);
+  if (n < 300) return 0;
+  const bin = 0.25, off = 600, nb = Math.ceil(1200 / bin);
+  const hh = new Uint32Array(nb);
+  const score = deg => {
+    const s = Math.sin(rad(deg)), c = Math.cos(rad(deg));
+    hh.fill(0);
+    for (let i = 0; i < n; i++) { const j = ((X[i] * s + Y[i] * c + off) / bin) | 0; if (j >= 0 && j < nb) hh[j]++; }
+    let sc = 0; for (let j = 0; j < nb; j++) sc += hh[j] * hh[j];
+    return sc;
+  };
+  let bestA = 0, bestS = -1;
+  for (let a = -3; a <= 3.0001; a += 0.1) { const s = score(a); if (s > bestS) { bestS = s; bestA = a; } }
+  const c0 = bestA;
+  for (let a = c0 - 0.1; a <= c0 + 0.1001; a += 0.01) { const s = score(a); if (s > bestS) { bestS = s; bestA = a; } }
+  return Math.max(-3, Math.min(3, Math.round(bestA * 100) / 100));
+}
+
+// Inhalts-Rahmen (mm rel. Seitenmitte) bei dx=dy=0, mit Percentil-Beschneidung
+function inkBox(p) {
+  const { X, Y, n } = inkMm(p);
+  if (n < 50) return null;
+  const s = Math.sin(rad(p.rot)), c = Math.cos(rad(p.rot));
+  const xs = new Float32Array(n), ys = new Float32Array(n);
+  for (let i = 0; i < n; i++) { xs[i] = X[i] * c - Y[i] * s; ys[i] = X[i] * s + Y[i] * c; }
+  xs.sort(); ys.sort();
+  const lo = Math.floor(n * 0.003), hi = Math.min(n - 1, Math.ceil(n * 0.997));
+  return { L: xs[lo], R: xs[hi], T: ys[lo], B: ys[hi] };
+}
+
+function autoRotate(list) { for (const p of list) p.rot = detectAngle(p); }
+
+// Faktor an der grössten der mittleren Seite(n) bestimmen, gleich für alle Seiten
+function autoScale() {
+  const n = pages.length; if (!n) return;
+  const idx = n % 2 ? [n >> 1] : [n / 2 - 1, n / 2];
+  const sv = { ...G };
+  G.scale = 100; G.stx = 0; G.sty = 0;
+  let best = null;
+  for (const i of idx) {
+    const pk = pages[i].k; pages[i].k = 1;   // Einzelseiten-Faktor bleibt ausser Betracht
+    const b = inkBox(pages[i]);
+    pages[i].k = pk;
+    if (b) { const w = b.R - b.L, h = b.B - b.T; if (!best || w * h > best.w * best.h) best = { w, h }; }
+  }
+  Object.assign(G, sv);
+  if (!best) return;
+  const m = Math.max(0, parseFloat($('mR').value) || 0);
+  const aw = A4W - 2 * m, ah = A4H - 2 * m;
+  const s = Math.min(aw / best.w, ah / best.h);
+  const slackX = aw / (best.w * s) - 1, slackY = ah / (best.h * s) - 1; // eine Dimension ist 0
+  G.scale = Math.round(s * 10000) / 100;
+  G.stx = Math.floor(Math.min(slackX, 0.10) * 1000) / 10;
+  G.sty = Math.floor(Math.min(slackY, 0.10) * 1000) / 10;
+}
+
+function autoAlign(list) {
+  const boxes = list.map(p => ({ p, b: inkBox(p) })).filter(o => o.b);
+  for (const { p, b } of boxes) {   // immer zentriert
+    p.dx = -(b.L + b.R) / 2;
+    p.dy = -(b.T + b.B) / 2;
+  }
+}
+
+function autoAll(from = 0) {
+  const list = pages.slice(from);
+  autoRotate(list); autoScale(); autoAlign(pages);
+}
+
+/* ---------- Anzeige ---------- */
+// Ansichten: links/rechts. Doppelseite: Seite 1 rechts, 2 links, 3 rechts, …; links oben bleibt leer.
+const views = [{ cv: $('cvL') }, { cv: $('cvR') }];
+function viewIdxs() {
+  if (!$('cDual').checked) return [-2, cur];
+  const s = Math.floor((cur + 1) / 2);
+  return [2 * s - 1, 2 * s];
+}
+
+let raf = 0;
+function draw() {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    const idxs = viewIdxs();
+    views.forEach((v, vi) => {
+      const cv = v.cv, ctx = cv.getContext('2d'), idx = idxs[vi], p = pages[idx];
+      cv.style.display = idx === -2 ? 'none' : '';
+      cv.classList.toggle('empty', !p);
+      cv.classList.toggle('cur', !!p && idx === cur);
+      cv.classList.toggle('sel', !!p && idx !== cur && selSet.has(p));
+      if (!p) { ctx.clearRect(0, 0, cv.width, cv.height); return; }
+      const ppm = cv.width / A4W;
+      renderPage(ctx, p, ppm, p.prev);
+      if (rectMode) {   // Rechtecke als Umriss zeigen (ausgewähltes rot), plus das gerade aufgezogene
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+        setPageTransform(ctx, p, ppm, p.prev);
+        const M = ctx.getTransform(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.setLineDash([5, 3]); ctx.lineWidth = 1.5;
+        for (const r of p.rects) {
+          ctx.strokeStyle = r === selRect ? 'rgba(220,40,40,.95)' : 'rgba(30,110,255,.9)';
+          ctx.beginPath();
+          r.forEach(([u, w], i) => {
+            const x = (u - .5) * p.prev.width, y = (w - .5) * p.prev.height;
+            const X = M.a * x + M.c * y + M.e, Y = M.b * x + M.d * y + M.f;
+            i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+          });
+          ctx.closePath(); ctx.stroke();
+        }
+        if (rubber && rubber.v === vi) {
+          ctx.strokeStyle = 'rgba(30,110,255,.9)';
+          ctx.strokeRect((rubber.X0 + A4W / 2) * ppm, (rubber.Y0 + A4H / 2) * ppm, (rubber.X1 - rubber.X0) * ppm, (rubber.Y1 - rubber.Y0) * ppm);
+        }
+        ctx.restore();
+      }
+      const m = margin() * ppm;
+      if (m > 0) {   // Randbereich als Rahmen anzeigen
+        ctx.save(); ctx.strokeStyle = 'rgba(220,40,40,.85)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+        ctx.strokeRect(m + .5, m + .5, A4W * ppm - 2 * m - 1, A4H * ppm - 2 * m - 1); ctx.restore();
+      }
+      if (gridTemp && idx === cur) {
+        ctx.save(); ctx.lineWidth = 1;
+        for (let mm = 0; mm <= A4W; mm += 5) {
+          ctx.strokeStyle = mm % 25 === 0 ? 'rgba(0,120,255,.35)' : 'rgba(0,120,255,.15)';
+          ctx.beginPath(); ctx.moveTo(Math.round(mm * ppm) + .5, 0); ctx.lineTo(Math.round(mm * ppm) + .5, A4H * ppm); ctx.stroke();
+        }
+        for (let mm = 0; mm <= A4H; mm += 5) {
+          ctx.strokeStyle = mm % 25 === 0 ? 'rgba(0,120,255,.35)' : 'rgba(0,120,255,.15)';
+          ctx.beginPath(); ctx.moveTo(0, Math.round(mm * ppm) + .5); ctx.lineTo(A4W * ppm, Math.round(mm * ppm) + .5); ctx.stroke();
+        }
+        ctx.restore();
+      }
+    });
+    // Miniaturen der sichtbaren und markierten Seiten nachziehen
+    new Set([...selSet, ...idxs.map(i => pages[i]).filter(Boolean)]).forEach(drawThumb);
+  });
+}
+
+function fitCanvas() {
+  const st = $('stage'), rw = $('rotWrap'), dual = $('cDual').checked, gap = 14;
+  const availW = st.clientWidth - 24, availH = st.clientHeight - rw.offsetHeight - 24 - 10;
+  const perW = dual ? (availW - gap) / 2 : availW;
+  const w = Math.max(80, Math.min(perW, availH * A4W / A4H)), h = w * A4H / A4W;
+  const dpr = window.devicePixelRatio || 1;
+  views.forEach(v => {
+    v.cv.style.width = w + 'px'; v.cv.style.height = h + 'px';
+    v.cv.width = Math.round(w * dpr); v.cv.height = Math.round(h * dpr);
+  });
+  rw.style.width = (dual ? 2 * w + gap : w) + 'px';
+  draw();
+}
+
+function drawThumb(p) {
+  if (!p || !p.thumb) return;
+  renderPage(p.thumb.getContext('2d'), p, p.thumb.width / A4W, p.prev);
+}
+let thumbTimer = 0;
+function drawAllThumbs() { clearTimeout(thumbTimer); thumbTimer = setTimeout(() => pages.forEach(drawThumb), 120); }
+
+function rebuildThumbs() {
+  const box = $('thumbs'); box.innerHTML = '';
+  box.append(document.createElement('div'));   // links oben bleibt frei: Seite 1 steht rechts
+  pages.forEach((p, i) => {
+    const d = document.createElement('div'); d.className = 'thumb';
+    const c = document.createElement('canvas'); c.width = 210 * 0.7; c.height = 297 * 0.7;
+    p.thumb = c; p.thumbEl = d;
+    const s = document.createElement('span'); s.textContent = i + 1;
+    d.append(c, s);
+    d.onclick = e => clickPage(pages.indexOf(p), e, false);
+    box.append(d);
+    drawThumb(p);
+  });
+  markSel();
+}
+function markSel() {
+  pages.forEach((p, i) => {
+    if (!p.thumbEl) return;
+    p.thumbEl.classList.toggle('sel', selSet.has(p));
+    p.thumbEl.classList.toggle('cur', i === cur);
+  });
+  const el = pages[cur] && pages[cur].thumbEl; if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function syncUI() {
+  const p = pages[cur];
+  $('empty').style.display = pages.length ? 'none' : 'flex';
+  $('bExport').disabled = !pages.length;
+  const sv = p ? -p.rot : 0;
+  $('rot').value = sv;
+  $('rotVal').textContent = (Math.abs(sv) < 0.005 ? 0 : sv).toFixed(2).replace('.', ',') + '°';
+  if (document.activeElement !== $('pK')) $('pK').value = p ? Math.round(p.k * 10000) / 100 : 100;
+  const g0 = targetsFor($('gSel').value)[0];
+  if (g0 && document.activeElement !== $('gGK')) $('gGK').value = Math.round(g0.k * 10000) / 100;
+  document.querySelectorAll('[data-q]').forEach(b => {
+    const qs = targetsFor($('gSel').value).map(x => x.q);
+    b.style.borderColor = qs.length && qs.every(v => v === +b.dataset.q) ? 'var(--acc)' : '';
+  });
+  $('gScale').value = G.scale; $('gStx').value = G.stx; $('gSty').value = G.sty;
+  markSel();
+}
+
+/* ---------- Interaktion ---------- */
+// Raster erscheint nur beim Verstellen des Winkels
+let gridTemp = false, gridHeld = false, gridTimer = 0;
+function bumpGrid() {
+  gridTemp = true; clearTimeout(gridTimer);
+  gridTimer = setTimeout(() => { if (gridHeld) return bumpGrid(); gridTemp = false; draw(); }, 1200);
+}
+$('rot').addEventListener('pointerdown', () => { gridHeld = true; });
+window.addEventListener('pointerup', () => { if (gridHeld) { gridHeld = false; bumpGrid(); } });
+$('mR').addEventListener('input', () => { draw(); drawAllThumbs(); });
+$('cDual').onchange = fitCanvas;
+
+const clampRot = v => Math.max(-3, Math.min(3, Math.round(v * 100) / 100));
+// Die aktive Seite erhält den Wert; weitere markierte Seiten werden um dieselbe Differenz gedreht
+function setRot(v) {
+  const p = pages[cur]; if (!p) return;
+  bumpGrid();
+  const nv = clampRot(v), d = nv - p.rot;
+  targetsFor('sel').forEach(t => { t.rot = t === p ? nv : clampRot(t.rot + d); });
+  syncUI(); draw();
+}
+// Reglerwert = -Drehwinkel: Regler nach rechts dreht gegen den Uhrzeigersinn
+$('rot').oninput = e => setRot(-parseFloat(e.target.value));
+$('rM').onclick = () => pages[cur] && setRot(pages[cur].rot + 0.05);
+$('rP').onclick = () => pages[cur] && setRot(pages[cur].rot - 0.05);
+$('rReset').onclick = () => { targetsFor('sel').forEach(t => { t.rot = 0; }); syncUI(); draw(); };
+
+function shift(ddx, ddy) {
+  const sel = $('dSel').value;
+  targetsFor(sel).forEach(p => { p.dx += ddx; p.dy += ddy; });
+  draw(); if (sel !== 'sel') drawAllThumbs();
+}
+document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
+  targetsFor($('gSel').value).forEach(p => { p.q = +b.dataset.q; });
+  syncUI(); draw(); drawAllThumbs();
+});
+$('gGK').addEventListener('input', e => {
+  const v = parseFloat(e.target.value);
+  if (!isFinite(v) || v < 10) return;
+  targetsFor($('gSel').value).forEach(p => { p.k = v / 100; });
+  syncUI(); draw(); drawAllThumbs();
+});
+$('gSel').onchange = () => syncUI();
+
+// Maus auf einer der beiden Seiten: verschieben oder (im Rechteck-Modus) Rechteck aufziehen
+let drag = null;
+const toMm = (e, cv) => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) / b.width * A4W - A4W / 2, (e.clientY - b.top) / b.height * A4H - A4H / 2]; };
+views.forEach((v, vi) => {
+  const cv = v.cv;
+  cv.addEventListener('pointerdown', e => {
+    const idx = viewIdxs()[vi], p = pages[idx]; if (!p) return;
+    const plain = clickPage(idx, e, true);   // wählt die angeklickte Seite aus
+    if (!plain) return;
+    cv.setPointerCapture(e.pointerId);
+    if (rectMode) { const [X, Y] = toMm(e, cv); rubber = { v: vi, p, X0: X, Y0: Y, X1: X, Y1: Y }; return; }
+    drag = { x: e.clientX, y: e.clientY, cv }; cv.classList.add('drag');
+  });
+  cv.addEventListener('pointermove', e => {
+    if (rubber && rubber.v === vi) { [rubber.X1, rubber.Y1] = toMm(e, cv); draw(); return; }
+    if (!drag || drag.cv !== cv) return;
+    const mm = cv.clientWidth / A4W;
+    shift((e.clientX - drag.x) / mm, (e.clientY - drag.y) / mm);
+    drag.x = e.clientX; drag.y = e.clientY;
+  });
+  const end = () => { if (rubber && rubber.v === vi) finishRect(); if (drag && drag.cv === cv) drag = null; cv.classList.remove('drag'); };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+});
+
+function finishRect() {
+  const r = rubber, p = r.p; rubber = null;
+  const x0 = Math.min(r.X0, r.X1), x1 = Math.max(r.X0, r.X1), y0 = Math.min(r.Y0, r.Y1), y1 = Math.max(r.Y0, r.Y1);
+  if (x1 - x0 < 1.5 && y1 - y0 < 1.5) {          // nur geklickt: Rechteck darunter auswählen
+    const [u, v] = mmToUV(p, r.X1, r.Y1);
+    selRect = null; p.rects.forEach(q => { if (inPoly(q, u, v)) selRect = q; });
+  } else {
+    selRect = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([X, Y]) => mmToUV(p, X, Y));
+    p.rects.push(selRect);
+  }
+  draw(); drawAllThumbs();
+}
+function delRect() {   // ausgewähltes Rechteck, sonst das zuletzt gezogene (aktive Seite)
+  const p = pages[cur]; if (!p || !p.rects.length) return;
+  const i = p.rects.indexOf(selRect);
+  p.rects.splice(i >= 0 ? i : p.rects.length - 1, 1); selRect = null;
+  draw(); drawAllThumbs();
+}
+$('bRectMode').onclick = () => {
+  rectMode = !rectMode;
+  $('bRectMode').textContent = rectMode ? 'Rechtecke ziehen: EIN' : 'Rechtecke ziehen: aus';
+  $('bRectMode').classList.toggle('primary', rectMode);
+  views.forEach(v => { v.cv.style.cursor = rectMode ? 'crosshair' : ''; });
+  draw();
+};
+$('bRectDel').onclick = delRect;
+$('bRectClear').onclick = () => { const p = pages[cur]; if (p) { p.rects.length = 0; selRect = null; draw(); drawAllThumbs(); } };
+
+document.addEventListener('keydown', e => {
+  if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox' && document.activeElement.type !== 'range') return;
+  if (rectMode && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); delRect(); return; }
+  const st = e.shiftKey ? 1 : 0.2;
+  const m = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key];
+  if (m && pages[cur]) { e.preventDefault(); shift(m[0], m[1]); }
+});
+
+const gIn = (id, key) => $(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (isFinite(v)) { G[key] = key === 'scale' ? Math.max(10, v) : v; draw(); drawAllThumbs(); } });
+gIn('gScale', 'scale'); gIn('gStx', 'stx'); gIn('gSty', 'sty');
+
+const withBusy = fn => () => { if (!pages.length) return; document.body.style.cursor = 'progress'; setTimeout(() => { fn(); document.body.style.cursor = ''; syncUI(); draw(); drawAllThumbs(); }, 10); };
+$('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
+$('aRot').onclick = withBusy(() => autoRotate(pages));
+$('aScale').onclick = withBusy(() => autoScale());
+$('aAlign').onclick = withBusy(() => autoAlign(pages));
+$('bReset').onclick = () => { targetsFor('sel').forEach(p => { p.rot = 0; p.q = 0; p.dx = 0; p.dy = 0; p.k = 1; }); syncUI(); draw(); drawAllThumbs(); };
+$('pK').addEventListener('input', e => {
+  const v = parseFloat(e.target.value);
+  if (isFinite(v) && v >= 10) { targetsFor('sel').forEach(p => { p.k = v / 100; }); draw(); drawAllThumbs(); }
+});
+
+/* ---------- Seiten verwalten ---------- */
+$('bLeft').onclick = () => { if (cur > 0) { [pages[cur - 1], pages[cur]] = [pages[cur], pages[cur - 1]]; cur--; rebuildThumbs(); syncUI(); draw(); } };
+$('bRight').onclick = () => { if (cur >= 0 && cur < pages.length - 1) { [pages[cur + 1], pages[cur]] = [pages[cur], pages[cur + 1]]; cur++; rebuildThumbs(); syncUI(); draw(); } };
+$('bDel').onclick = () => {
+  if (cur < 0) return;
+  const del = new Set(targetsFor('sel')), first = pages.findIndex(p => del.has(p));
+  for (let i = pages.length - 1; i >= 0; i--) if (del.has(pages[i])) pages.splice(i, 1);
+  selectOnly(Math.min(first, pages.length - 1));
+  ensureSel(); rebuildThumbs(); syncUI(); draw();
+};
+
+function blankPage() {
+  const c = document.createElement('canvas'); c.width = 420; c.height = 594;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, rects: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
+}
+$('bBlank').onclick = () => {
+  const i = Math.max(cur, 0);
+  pages.splice(i, 0, blankPage());
+  cur = pages.length === 1 ? 0 : i + 1;           // markierte Seite bleibt markiert
+  ensureSel(); rebuildThumbs(); syncUI(); draw();
+  setStatus(`Leere Seite vor Seite ${i + 1} eingefügt.`);
+};
+$('bDup').onclick = () => {
+  const src = targetsFor('sel'); if (!src.length) return;
+  const copies = [];
+  for (let i = pages.length - 1; i >= 0; i--) {
+    const p = pages[i]; if (!src.includes(p)) continue;
+    const d = { ...p, name: p.name + ' (Kopie)', thumb: null, thumbEl: null, rects: p.rects.map(r => r.map(pt => [...pt])) };
+    pages.splice(i + 1, 0, d); copies.unshift(d);
+  }
+  selSet = new Set(copies); cur = pages.indexOf(copies[0]); anchor = cur; selRect = null;
+  rebuildThumbs(); syncUI(); draw();
+  setStatus(`${copies.length} Seite(n) dupliziert.`);
+};
+
+/* ---------- Dateien ---------- */
+$('bOpen').onclick = () => $('file').click();
+$('file').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); document.body.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); if (t === 'drop' || e.target === document.documentElement) document.body.classList.remove('over'); }));
+window.addEventListener('drop', e => { document.body.classList.remove('over'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+/* ---------- Export ---------- */
+$('eMode').onchange = () => { const s = $('eMode').value === 'small'; $('eSmall').hidden = !s; $('eSmallQ').hidden = !s; };
+
+// Originalquelle in voller Auflösung laden (Bild oder gerenderte PDF-Seite)
+async function loadSource(p, cache) {
+  const s = p.src;
+  if (s.kind === 'img') return await createImageBitmap(new Blob([s.bytes]));
+  let doc = cache.get(s.bytes);
+  if (!doc) { doc = await pdfjsLib.getDocument({ data: s.bytes.slice(0) }).promise; cache.set(s.bytes, doc); }
+  const pg = await doc.getPage(s.index + 1), v1 = pg.getViewport({ scale: 1 });
+  let sc = s.pxW > 0 ? s.pxW / v1.width : 300 / 72;
+  sc = Math.min(sc, 7000 / Math.max(v1.width, v1.height));
+  const vp = pg.getViewport({ scale: sc });
+  const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  await pg.render({ canvasContext: x, viewport: vp }).promise;
+  return c;
+}
+
+$('bExport').onclick = async () => {
+  if (!pages.length) return;
+  if (!window.PDFLib) { setStatus('pdf-lib konnte nicht geladen werden (Internet?)'); return; }
+  const mode = $('eMode').value, dpi = parseInt($('eDpi').value), qSmall = parseFloat($('eQ').value);
+  const doc = await PDFLib.PDFDocument.create();
+  const cache = new Map();
+  $('bExport').disabled = true;
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      setStatus(`Exportiere Seite ${i + 1}/${pages.length} …`);
+      await new Promise(r => setTimeout(r, 10));
+      if (p.src.kind === 'blank') { doc.addPage([595.28, 841.89]); continue; }
+      const img = await loadSource(p, cache);
+      const { fx, fy } = factors(p);
+      let ppm = mode === 'small' ? dpi / 25.4 : Math.max(img.width / fx, img.height / fy); // Pixel pro mm
+      ppm = Math.min(ppm, 33); // ca. 840 dpi als Obergrenze
+      const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
+      renderPage(c.getContext('2d'), p, c.width / A4W, img);
+      img.close && img.close();
+      const png = mode === 'png';
+      const blob = await new Promise(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', mode === 'jpg' ? 0.95 : qSmall));
+      c.width = c.height = 1;
+      const bytesImg = new Uint8Array(await blob.arrayBuffer());
+      const emb = png ? await doc.embedPng(bytesImg) : await doc.embedJpg(bytesImg);
+      const pg = doc.addPage([595.28, 841.89]);
+      pg.drawImage(emb, { x: 0, y: 0, width: 595.28, height: 841.89 });
+    }
+    cache.forEach(d => d.destroy && d.destroy());
+    const bytes = await doc.save();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    a.download = 'noten-a4.pdf'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    setStatus(`Fertig: ${pages.length} Seite(n), ${(bytes.length / 1048576).toFixed(1)} MB.`);
+  } catch (e) { console.error(e); setStatus('Export-Fehler: ' + e.message); }
+  $('bExport').disabled = false;
+};
+
+new ResizeObserver(fitCanvas).observe($('stage'));
+window.addEventListener('resize', fitCanvas);
+fitCanvas(); syncUI();
+</script>
+</body>
+</html>

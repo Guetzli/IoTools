@@ -1,0 +1,15 @@
+# Betriebssystem / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Lokale Umgebung und Secrets
+.env
+.env.*
+
+# Ausgaben
+dist/
+build/
+node_modules/
+*.log
