@@ -880,24 +880,19 @@ $('bExport').onclick = async () => {
     const doc = await PDFLib.PDFDocument.create();
     for (let i = 0; i < n; i++) {
       const p = pages[i];
-      // Teilschritte innerhalb einer Seite, damit der Balken auch bei grossen Seiten vorankommt
-      const step = (f, what) => { setProgress((i + f) / n); setStatus(`Seite ${i + 1}/${n}: ${what} …`); };
-      step(0, 'Lade');
+      setProgress(i / n); setStatus(`Seite ${i + 1}/${n}`);
       await new Promise(r => setTimeout(r, 10));
       if (p.src.kind === 'blank') { doc.addPage([595.28, 841.89]); continue; }
       const img = await loadSource(p, cache);
       const { fx, fy } = factors(p);
       let ppm = mode === 'small' ? dpi / 25.4 : Math.max(img.width / fx, img.height / fy); // Pixel pro mm
       ppm = Math.min(ppm, 33); // ca. 840 dpi als Obergrenze
-      step(0.25, 'Rendere');
       const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
       renderPage(c.getContext('2d'), p, c.width / A4W, img);
       img.close && img.close();
       const png = mode === 'png';
-      step(0.5, png ? 'Kodiere PNG' : 'Kodiere JPEG');
       const blob = await new Promise(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', mode === 'jpg' ? 0.95 : qSmall));
       c.width = c.height = 1;
-      step(0.85, 'Füge ein');
       const bytesImg = new Uint8Array(await blob.arrayBuffer());
       const emb = png ? await doc.embedPng(bytesImg) : await doc.embedJpg(bytesImg);
       const pg = doc.addPage([595.28, 841.89]);
