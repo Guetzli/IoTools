@@ -31,6 +31,12 @@ button:disabled{opacity:.4;cursor:default}
 .thumb.cur{box-shadow:0 0 0 2px var(--acc)}
 .thumb canvas{width:100%;display:block;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .thumb span{position:absolute;left:4px;top:2px;font-size:11px;line-height:1.2;background:rgba(0,0,0,.55);color:#fff;border-radius:3px;padding:0 4px}
+.thumb .tdel{position:absolute;right:4px;top:2px;font-size:11px;line-height:1.2;padding:0 5px;border:none;border-radius:3px;background:rgba(0,0,0,.55);color:#fff}
+.thumb .tdel:hover{background:rgba(200,40,40,.95);border:none}
+.thumb.dragging{opacity:.4}
+.thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
+.thumb[data-drop=before]::before{top:-6px}
+.thumb[data-drop=after]::after{bottom:-6px}
 #stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px;min-width:0;min-height:0;position:relative}
 #views{display:flex;gap:14px;align-items:flex-start;justify-content:center}
 .pv{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.35);cursor:grab;touch-action:none}
@@ -57,7 +63,7 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
       <button id="bRight" title="Seite nach hinten">▶</button>
       <button id="bDel" title="Markierte Seiten entfernen">✕</button>
     </div>
-    <p class="hint">Klick wählt eine Seite, Shift einen Bereich, Strg/Cmd einzelne Seiten dazu.</p>
+    <p class="hint">Klick wählt eine Seite, Shift einen Bereich, Strg/Cmd einzelne Seiten dazu. Miniaturen per Drag and Drop verschieben, ✕ an einer Miniatur entfernt genau diese Seite.</p>
     <div id="thumbs"></div>
   </aside>
 
@@ -575,12 +581,59 @@ function rebuildThumbs() {
     const c = document.createElement('canvas'); c.width = 210 * 0.7; c.height = 297 * 0.7;
     p.thumb = c; p.thumbEl = d;
     const s = document.createElement('span'); s.textContent = i + 1;
-    d.append(c, s);
+    const x = document.createElement('button'); x.className = 'tdel'; x.textContent = '✕'; x.title = 'Diese Seite entfernen';
+    x.onclick = e => { e.stopPropagation(); removePages([p]); };
+    d.append(c, s, x);
     d.onclick = e => clickPage(pages.indexOf(p), e, false);
+    // Drag and Drop zum Umsortieren
+    d.draggable = true;
+    d.ondragstart = e => {
+      if (!selSet.has(p)) selectOnly(pages.indexOf(p));
+      dragPage = p; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'seite');
+      markSel(); d.classList.add('dragging');
+    };
+    d.ondragend = () => { dragPage = null; d.classList.remove('dragging'); document.querySelectorAll('.thumb[data-drop]').forEach(t => delete t.dataset.drop); };
+    d.ondragover = e => {
+      if (!dragPage) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      const r = d.getBoundingClientRect();
+      d.dataset.drop = e.clientY > r.top + r.height / 2 ? 'after' : 'before';
+    };
+    d.ondragleave = () => { delete d.dataset.drop; };
+    d.ondrop = e => {
+      if (!dragPage) return;
+      e.preventDefault(); e.stopPropagation();
+      const after = d.dataset.drop === 'after';
+      delete d.dataset.drop;
+      movePages(dragPage, pages.indexOf(p), after);
+    };
     box.append(d);
     drawThumb(p);
   });
   markSel();
+}
+let dragPage = null;   // gerade in der Miniaturenliste gezogene Seite
+// Seiten (lead, und bei Mehrfachauswahl alle markierten) vor/nach die Zielseite setzen
+function movePages(lead, target, after) {
+  const moving = selSet.has(lead) && selSet.size > 1 ? pages.filter(p => selSet.has(p)) : [lead];
+  const tp = pages[target];
+  if (!tp || moving.includes(tp)) return;
+  const rest = pages.filter(p => !moving.includes(p));
+  rest.splice(rest.indexOf(tp) + (after ? 1 : 0), 0, ...moving);
+  pages.length = 0; pages.push(...rest);
+  cur = pages.indexOf(lead);
+  rebuildThumbs(); syncUI(); draw();
+  setStatus(`${moving.length} Seite(n) verschoben.`);
+}
+// Seiten entfernen; die Auswahl springt auf die Seite an der Stelle der ersten entfernten
+function removePages(list) {
+  if (!list.length) return;
+  const del = new Set(list), first = pages.findIndex(p => del.has(p));
+  for (let i = pages.length - 1; i >= 0; i--) if (del.has(pages[i])) pages.splice(i, 1);
+  selectOnly(Math.max(0, Math.min(first, pages.length - 1)));
+  if (!pages.length) { cur = -1; selSet = new Set(); }
+  ensureSel(); rebuildThumbs(); syncUI(); draw();
+  setStatus(`${list.length} Seite(n) entfernt.`);
 }
 function markSel() {
   pages.forEach((p, i) => {
@@ -730,13 +783,7 @@ $('pK').addEventListener('input', e => {
 /* ---------- Seiten verwalten ---------- */
 $('bLeft').onclick = () => { if (cur > 0) { [pages[cur - 1], pages[cur]] = [pages[cur], pages[cur - 1]]; cur--; rebuildThumbs(); syncUI(); draw(); } };
 $('bRight').onclick = () => { if (cur >= 0 && cur < pages.length - 1) { [pages[cur + 1], pages[cur]] = [pages[cur], pages[cur + 1]]; cur++; rebuildThumbs(); syncUI(); draw(); } };
-$('bDel').onclick = () => {
-  if (cur < 0) return;
-  const del = new Set(targetsFor('sel')), first = pages.findIndex(p => del.has(p));
-  for (let i = pages.length - 1; i >= 0; i--) if (del.has(pages[i])) pages.splice(i, 1);
-  selectOnly(Math.min(first, pages.length - 1));
-  ensureSel(); rebuildThumbs(); syncUI(); draw();
-};
+$('bDel').onclick = () => { if (cur >= 0) removePages(targetsFor('sel')); };
 
 function blankPage() {
   const c = document.createElement('canvas'); c.width = 420; c.height = 594;
@@ -766,8 +813,10 @@ $('bDup').onclick = () => {
 /* ---------- Dateien ---------- */
 $('bOpen').onclick = () => $('file').click();
 $('file').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
-['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); document.body.classList.add('over'); }));
-['dragleave', 'drop'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); if (t === 'drop' || e.target === document.documentElement) document.body.classList.remove('over'); }));
+// Nur Datei-Drags aufnehmen; das Umsortieren der Miniaturen läuft separat
+const hasFiles = e => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { if (!hasFiles(e)) return; e.preventDefault(); document.body.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => window.addEventListener(t, e => { if (!hasFiles(e)) return; e.preventDefault(); if (t === 'drop' || e.target === document.documentElement) document.body.classList.remove('over'); }));
 window.addEventListener('drop', e => { document.body.classList.remove('over'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
 
 /* ---------- Export ---------- */
