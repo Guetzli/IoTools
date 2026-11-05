@@ -51,6 +51,11 @@ button:disabled{opacity:.4;cursor:default}
 #status{font-size:12px;color:var(--muted);min-height:1.4em;margin-top:8px}
 body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
 .hint{font-size:12px;color:var(--muted)}
+#busy{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.2);z-index:100;padding:16px}
+#busy.on{display:flex}
+#busy>div{background:var(--panel);color:var(--fg);padding:20px 26px;border-radius:10px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.4);max-width:90vw}
+.spin{width:34px;height:34px;margin:0 auto 12px;border:4px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){#main{grid-template-columns:1fr;grid-template-rows:auto 70vh auto;height:auto}}
 </style>
 </head>
@@ -150,6 +155,8 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
   </aside>
 </div>
 
+<div id="busy" role="status" aria-live="polite"><div><div class="spin"></div><div id="busyMsg">Lade …</div></div></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script>
@@ -166,7 +173,17 @@ let anchor = 0;               // Ankerseite für Shift-Auswahl
 const G = { scale: 100, stx: 0, sty: 0 };
 let rectMode = false, rubber = null, selRect = null;   // weisse Rechtecke
 
-function setStatus(t) { $('status').textContent = t; }
+function setStatus(t) { $('status').textContent = t; if (busy) $('busyMsg').textContent = t; }
+
+// Während des Imports ist die ganze Oberfläche gesperrt (Overlay + inert)
+let busy = false;
+function setBusy(on, msg = '') {
+  busy = on;
+  $('main').inert = on;
+  $('busy').classList.toggle('on', on);
+  $('busyMsg').textContent = msg;
+  document.body.style.cursor = on ? 'progress' : '';
+}
 
 /* ---------- Laden ---------- */
 // Die Canvas-Bilder sind nur Vorschau und Analyse. Der Export lädt die Originaldaten (p.src) in voller Auflösung neu.
@@ -230,24 +247,28 @@ async function addPdf(f) {
 }
 
 async function addFiles(list) {
+  if (busy) { setStatus('Bitte warten, der aktuelle Import läuft noch.'); return; }
   const coll = new Intl.Collator(undefined, { numeric: true });
   const files = [...list].sort((a, b) => coll.compare(a.name, b.name));
   const first = pages.length;
-  document.body.style.cursor = 'progress';
-  for (const f of files) {
-    try {
-      if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) await addPdf(f);
-      else if (f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name)) await addImage(f);
-      else setStatus('Nicht unterstützt: ' + f.name);
-    } catch (e) { console.error(e); setStatus('Fehler bei ' + f.name + ': ' + e.message); }
+  setBusy(true, 'Lade Dateien …');
+  try {
+    for (const f of files) {
+      try {
+        if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) await addPdf(f);
+        else if (f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name)) await addImage(f);
+        else setStatus('Nicht unterstützt: ' + f.name);
+      } catch (e) { console.error(e); setStatus('Fehler bei ' + f.name + ': ' + e.message); }
+    }
+    if (pages.length > first) {
+      if ($('cAutoLoad').checked) autoAll(first);
+      selectOnly(first);
+      setStatus(`${pages.length} Seite(n) geladen.`);
+    }
+  } finally {
+    setBusy(false);
+    rebuildThumbs(); syncUI(); draw();
   }
-  document.body.style.cursor = '';
-  if (pages.length > first) {
-    if ($('cAutoLoad').checked) autoAll(first);
-    selectOnly(first);
-    setStatus(`${pages.length} Seite(n) geladen.`);
-  }
-  rebuildThumbs(); syncUI(); draw();
 }
 
 /* ---------- Auswahl ---------- */
@@ -759,6 +780,7 @@ $('bRectDel').onclick = delRect;
 $('bRectClear').onclick = () => { const p = pages[cur]; if (p) { p.rects.length = 0; selRect = null; draw(); drawAllThumbs(); } };
 
 document.addEventListener('keydown', e => {
+  if (busy) return;
   if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox' && document.activeElement.type !== 'range') return;
   if (rectMode && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); delRect(); return; }
   const st = e.shiftKey ? 1 : 0.2;
