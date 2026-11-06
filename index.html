@@ -47,11 +47,10 @@ button:disabled{opacity:.4;cursor:default}
 .menu button{border:none;background:transparent;text-align:left;padding:7px 10px}
 .menu button:hover{background:var(--bg)}
 .seg{display:flex;margin:5px 0}
-.menu .seg{margin:2px 2px 6px}
-.seg button,.menu .seg button{flex:1;text-align:center;font-size:12px;padding:4px 2px;border:1px solid var(--line);border-radius:0;margin-left:-1px;background:var(--panel)}
-.seg button:first-child,.menu .seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
-.seg button:last-child,.menu .seg button:last-child{border-radius:0 6px 6px 0}
-.seg button.on,.menu .seg button.on{background:var(--acc);color:var(--accfg);border-color:var(--acc);position:relative}
+.seg button{flex:1;text-align:center;font-size:12px;padding:4px 2px;border:1px solid var(--line);border-radius:0;margin-left:-1px;background:var(--panel)}
+.seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
+.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on{background:var(--acc);color:var(--accfg);border-color:var(--acc);position:relative}
 .rotq button{display:flex;justify-content:center;padding:4px}
 .rotq svg{width:22px;height:22px;overflow:visible;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .rotq .guide{stroke-opacity:.3;stroke-width:1.4;stroke-dasharray:1.6 2.2}
@@ -127,6 +126,7 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     </div>
     <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" min="10" value="100"></div>
     <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
+    <div class="row"><label>Rand (mm)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
     <div class="row btns rotq">
       <button data-dq="-90" title="90° gegen den Uhrzeigersinn drehen" aria-label="90° gegen den Uhrzeigersinn drehen"><svg viewBox="-1 -1 26 26"><circle class="guide" cx="12" cy="12" r="8"/><path d="M12 4A8 8 0 0 0 4 12"/><path d="M1.3 9.3L4 12.6L6.7 9.3"/></svg></button>
       <button data-dq="180" title="180° drehen" aria-label="180° drehen"><svg viewBox="-1 -1 26 26"><circle class="guide" cx="12" cy="12" r="8"/><path d="M12 4A8 8 0 0 1 12 20"/><path d="M14.7 17.3L11.4 20L14.7 22.7"/></svg></button>
@@ -134,30 +134,21 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     </div>
 
     <div class="split" id="aSplit">
-      <button id="aAll" class="primary main" title="Gerade drehen, Grösse und Ausrichten nacheinander">Automatisch alles</button><button id="aMore" class="primary more" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
+      <button id="aAll" class="primary main" title="Gerade drehen, Grösse und Ausrichten für die oben gewählten Seiten">Automatisch alles</button><button id="aMore" class="primary more" aria-haspopup="menu" aria-expanded="false" title="Einzelnen Schritt für die oben gewählten Seiten">▾</button>
       <div class="menu" id="aMenu" role="menu" hidden>
-        <div class="seg" id="aSeg" role="radiogroup" aria-label="Seiten">
-          <button data-g="all" role="radio">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
-        </div>
-        <button id="aAllG" role="menuitem">Alles</button>
         <button id="aRot" role="menuitem">Gerade drehen</button>
         <button id="aScale" role="menuitem" title="Gleiche Grösse für die gewählten Seiten, sodass nichts über den Rand ragt">Grösse</button>
         <button id="aAlign" role="menuitem">Ausrichten</button>
       </div>
     </div>
     <div class="split" id="rSplit">
-      <button id="rAll" class="main" title="Drehung, Grösse und Ausrichtung aller Seiten zurücksetzen">Zurücksetzen alles</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Einzeln oder für bestimmte Seiten zurücksetzen">▾</button>
+      <button id="rAll" class="main" title="Drehung, Grösse und Ausrichtung der oben gewählten Seiten zurücksetzen">Zurücksetzen alles</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Einzelnen Teil der oben gewählten Seiten zurücksetzen">▾</button>
       <div class="menu" id="rMenu" role="menu" hidden>
-        <div class="seg" id="rSeg" role="radiogroup" aria-label="Seiten">
-          <button data-g="all" role="radio">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
-        </div>
-        <button data-reset="all" role="menuitem">Alles</button>
         <button data-reset="rot" role="menuitem" title="Feindrehung und 90°-Drehung">Drehung</button>
         <button data-reset="size" role="menuitem" title="Grösse und Höhe zusätzlich">Grösse</button>
         <button data-reset="pos" role="menuitem" title="Verschiebung">Ausrichtung</button>
       </div>
     </div>
-    <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
 
     <h3>Verschieben</h3>
     <div class="row"><label>Verschieben wirkt auf</label>
@@ -237,7 +228,7 @@ const PREV_LONG = 2200;
 
 function makePage(c, name, src) {
   // layers: in Reihenfolge gezeichnet: weisse Rechtecke {t:'rect', poly} und eingefügte Stücke {t:'piece', …}
-  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, layers: [], aspect: c.height / c.width, ink: null, thumb: null };
+  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, m: MARGIN0, layers: [], aspect: c.height / c.width, ink: null, thumb: null };
   analyze(p);
   pages.push(p);
   return p;
@@ -399,7 +390,7 @@ function renderPage(ctx, p, ppm, imgOf = q => q.prev) {
   renderContent(ctx, p, ppm, imgOf);
   ctx.restore();
   // Alles ausserhalb des Rands weiss machen (entfernt Scan-Schatten, gilt auch im Export)
-  const m = margin() * ppm;
+  const m = margin(p) * ppm;
   if (m > 0) {
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, W, m); ctx.fillRect(0, H - m, W, m);
@@ -407,7 +398,8 @@ function renderPage(ctx, p, ppm, imgOf = q => q.prev) {
     ctx.restore();
   }
 }
-const margin = () => Math.max(0, parseFloat(document.getElementById('mR').value) || 0);
+// Rand pro Seite (mm); alles ausserhalb wird weiss
+const MARGIN0 = 12, margin = p => p && p.m != null ? p.m : MARGIN0;
 
 // Scan und Ebenen einer Seite zeichnen; der Kontext steht im Seitenursprung (Pixel). Rekursiv für Stücke.
 function renderContent(ctx, p, ppm, imgOf) {
@@ -670,7 +662,8 @@ function autoScale(list = pages) {
     if (b) { maxW = Math.max(maxW, b.R - b.L); maxH = Math.max(maxH, b.B - b.T); }
   }
   if (!maxW || !maxH) { list.forEach((p, i) => { [p.k, p.sy] = sv[i]; }); return; }
-  const m = margin(), s = Math.min((A4W - 2 * m) / maxW, (A4H - 2 * m) / maxH);
+  // bei verschiedenen Rändern zählt der grösste, damit alle Seiten passen
+  const m = Math.max(...list.map(margin)), s = Math.min((A4W - 2 * m) / maxW, (A4H - 2 * m) / maxH);
   list.forEach(p => { p.k = Math.floor(s * 10000) / 10000; });
 }
 
@@ -682,10 +675,6 @@ function autoAlign(list) {
   }
 }
 
-function autoAll(from = 0) {
-  const list = pages.slice(from);
-  autoRotate(list); autoScale(); autoAlign(pages);
-}
 
 /* ---------- Anzeige ---------- */
 // Ansichten: immer Doppelseite. Seite 1 rechts, 2 links, 3 rechts, …; links von Seite 1 bleibt leer.
@@ -744,7 +733,7 @@ function draw() {
         ctx.strokeRect((c.x0 + ox + A4W / 2) * ppm, (c.y0 + oy + A4H / 2) * ppm, (c.x1 - c.x0) * ppm, (c.y1 - c.y0) * ppm);
         ctx.restore();
       }
-      const m = margin() * ppm;
+      const m = margin(p) * ppm;
       if (m > 0) {   // Randbereich als Rahmen anzeigen
         ctx.save(); ctx.strokeStyle = 'rgba(220,40,40,.85)'; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
         ctx.strokeRect(m + .5, m + .5, A4W * ppm - 2 * m - 1, A4H * ppm - 2 * m - 1); ctx.restore();
@@ -884,7 +873,7 @@ function syncUI() {
   $('rotVal').textContent = (Math.abs(sv) < 0.005 ? 0 : sv).toFixed(2).replace('.', ',') + '°';
   // Grösse / Höhe der gewählten Seitengruppe; verschiedene Werte: leeres Feld mit «gemischt»
   const t = targetsFor(pageGroup());
-  [['gScale', p => Math.round(p.k * 10000) / 100], ['gSty', p => Math.round((p.sy || 0) * 100) / 100]].forEach(([id, f]) => {
+  [['gScale', p => Math.round(p.k * 10000) / 100], ['gSty', p => Math.round((p.sy || 0) * 100) / 100], ['mR', margin]].forEach(([id, f]) => {
     const el = $(id); if (document.activeElement === el) return;
     const vs = [...new Set(t.map(f))];
     el.value = vs.length === 1 ? vs[0] : '';
@@ -902,7 +891,11 @@ function bumpGrid() {
 }
 $('rot').addEventListener('pointerdown', () => { gridHeld = true; });
 window.addEventListener('pointerup', () => { if (gridHeld) { gridHeld = false; bumpGrid(); } });
-$('mR').addEventListener('input', () => { draw(); drawAllThumbs(); });
+$('mR').addEventListener('input', e => {
+  const v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return;
+  targetsFor(pageGroup()).forEach(p => { p.m = v; });
+  draw(); drawAllThumbs();
+});
 
 const clampRot = v => Math.max(-3, Math.min(3, Math.round(v * 100) / 100));
 // Die aktive Seite erhält den Wert; weitere markierte Seiten werden um dieselbe Differenz gedreht
@@ -942,7 +935,7 @@ $('gSty').addEventListener('input', e => {   // darf negativ sein
   targetsFor(pageGroup()).forEach(p => { p.sy = v; });
   draw(); drawAllThumbs();
 });
-['gScale', 'gSty'].forEach(id => $(id).addEventListener('change', () => syncUI()));
+['gScale', 'gSty', 'mR'].forEach(id => $(id).addEventListener('change', () => syncUI()));
 
 // Maus auf einer der beiden Seiten: verschieben oder (im Rechteck-Modus) Rechteck aufziehen
 let drag = null;
@@ -1116,11 +1109,10 @@ const withBusy = fn => () => {
   setBusy(true, 'Automatik läuft …');
   setTimeout(() => { try { fn(); } finally { setBusy(false); syncUI(); draw(); drawAllThumbs(); } }, 50);
 };
-$('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
-// Menü: Seitenauswahl aus dem Umschalter
-const autoGroup = () => { const b = document.querySelector('#aSeg .on'); return b ? b.dataset.g : 'all'; };
+// Automatik und Zurücksetzen wirken auf die oben unter «Seiten anpassen» gewählte Gruppe
+const autoGroup = pageGroup;
 const autoList = g => g === 'all' ? pages : targetsFor(g);
-$('aAllG').onclick = withBusy(() => {
+$('aAll').onclick = withBusy(() => {
   const g = autoGroup(), t = autoList(g);
   autoRotate(t); autoScale(t); autoAlign(t);
   setStatus(`Automatik angewendet: ${GROUP[g]} (${t.length}).`);
@@ -1137,13 +1129,7 @@ document.querySelectorAll('.split').forEach(root => {
   const more = root.querySelector('.more'), menu = root.querySelector('.menu');
   const set = open => { menu.hidden = !open; more.setAttribute('aria-expanded', open); };
   splitMenus.push(set);
-  const seg = menu.querySelector('.seg');
-  more.onclick = e => {
-    e.stopPropagation(); const open = menu.hidden; splitMenus.forEach(s => s(false)); set(open);
-    if (open && seg) setSeg(seg, seg.firstElementChild);   // Seitenauswahl startet immer bei «Alle»
-  };
-  if (seg) seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setSeg(seg, b); });
-  // Nur eine Aktion schliesst das Menü, der Seitenumschalter nicht
+  more.onclick = e => { e.stopPropagation(); const open = menu.hidden; splitMenus.forEach(s => s(false)); set(open); };
   menu.addEventListener('click', e => { if (e.target.closest('[role=menuitem]')) set(false); });
   document.addEventListener('click', e => { if (!root.contains(e.target)) set(false); });
 });
@@ -1163,15 +1149,14 @@ function resetPages(g, what) {
   syncUI(); draw(); drawAllThumbs();
   setStatus(`Zurückgesetzt: ${GROUP[g]}, ${WHAT[what]} (${t.length}).`);
 }
-const resetGroup = () => { const b = document.querySelector('#rSeg .on'); return b ? b.dataset.g : 'all'; };
-$('rAll').onclick = () => resetPages('all', 'all');
-document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => resetPages(resetGroup(), b.dataset.reset));
+$('rAll').onclick = () => resetPages(pageGroup(), 'all');
+document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => resetPages(pageGroup(), b.dataset.reset));
 
 /* ---------- Seiten verwalten ---------- */
 function blankPage() {
   const c = document.createElement('canvas'); c.width = 420; c.height = 594;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
+  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, m: MARGIN0, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
 }
 $('bDup').onclick = () => {
   const src = targetsFor('sel'); if (!src.length) return;
