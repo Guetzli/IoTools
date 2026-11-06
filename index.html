@@ -700,18 +700,38 @@ function measure(p) {
   return { L: X0 / r - bw / 2, R: (X1 + 1) / r - bw / 2, T: Y0 / r - bh / 2, B: (Y1 + 1) / r - bh / 2, staves: staves.length };
 }
 
-function autoRotate(list) { for (const p of list) p.rot = detectAngle(p); }
+// Fortschritt der Automatik: zählt Seitenschritte; zeigt Schritt, Seite x/n, Balken und geschätzte Restzeit
+let prog = null;
+const fmtDur = ms => { const t = Math.ceil(ms / 1000); return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${String(t % 60).padStart(2, '0')} s`; };
+// Gewicht je Schritt (gemessen): Gerade drehen ist schneller als Messen
+const W_ROT = 0.65;
+async function progStep(label, i, n, w = 1) {
+  if (!prog) return;
+  prog.done += w;
+  const now = performance.now();
+  if (now - prog.last < 80 && prog.done < prog.total - 1e-6) return;   // höchstens ~12 Anzeigen pro Sekunde
+  prog.last = now;
+  const el = now - prog.t0, rest = el / prog.done * (prog.total - prog.done);
+  $('busyMsg').textContent = `${label}: Seite ${i}/${n}` + (el > 1500 && rest > 500 ? ` · noch ca. ${fmtDur(rest)}` : '');
+  setProgress(prog.done / prog.total);
+  await new Promise(r => setTimeout(r));
+}
+
+async function autoRotate(list) {
+  for (let i = 0; i < list.length; i++) { list[i].rot = detectAngle(list[i]); await progStep('Gerade drehen', i + 1, list.length, W_ROT); }
+}
 
 // Grösse: die Seiten der Liste messen; die breiteste und die höchste bestimmen einen gemeinsamen Faktor,
 // sodass keine davon über den Rand ragt. Keine Streckung (Höhe zusätzlich = 0). Übrige Seiten bleiben.
-function autoScale(list = pages) {
+async function autoScale(list = pages) {
   if (!list.length) return;
   const sv = list.map(p => [p.k, p.sy]);
   list.forEach(p => { p.k = 1; p.sy = 0; });
   let maxW = 0, maxH = 0;
-  for (const p of list) {
-    const b = measure(p);
+  for (let i = 0; i < list.length; i++) {
+    const b = measure(list[i]);
     if (b) { maxW = Math.max(maxW, b.R - b.L); maxH = Math.max(maxH, b.B - b.T); }
+    await progStep('Grösse messen', i + 1, list.length);
   }
   if (!maxW || !maxH) { list.forEach((p, i) => { [p.k, p.sy] = sv[i]; }); return; }
   // bei verschiedenen Rändern zählt der grösste, damit alle Seiten passen
@@ -719,11 +739,11 @@ function autoScale(list = pages) {
   list.forEach(p => { p.k = Math.floor(s * 10000) / 10000; });
 }
 
-function autoAlign(list) {
-  const boxes = list.map(p => ({ p, b: measure(p) })).filter(o => o.b);
-  for (const { p, b } of boxes) {   // immer zentriert
-    p.dx = -(b.L + b.R) / 2;
-    p.dy = -(b.T + b.B) / 2;
+async function autoAlign(list) {
+  for (let i = 0; i < list.length; i++) {   // immer zentriert
+    const p = list[i], b = measure(p);
+    if (b) { p.dx = -(b.L + b.R) / 2; p.dy = -(b.T + b.B) / 2; }
+    await progStep('Ausrichten', i + 1, list.length);
   }
 }
 
@@ -1175,23 +1195,24 @@ document.addEventListener('keydown', e => {
 });
 
 
-// Automatik sperrt die Oberfläche (Overlay), bis sie fertig ist
-const withBusy = fn => () => {
-  if (!pages.length || busy) return;
-  setBusy(true, 'Automatik läuft …');
-  setTimeout(() => { try { fn(); } finally { setBusy(false); syncUI(); draw(); drawAllThumbs(); } }, 50);
-};
-// Automatik und Zurücksetzen wirken auf die oben unter «Seiten anpassen» gewählte Gruppe
+// Automatik sperrt die Oberfläche (Overlay) und zeigt den Fortschritt; steps = Durchgänge über die Seiten
 const autoGroup = pageGroup;
 const autoList = g => g === 'all' ? pages : targetsFor(g);
-$('aAll').onclick = withBusy(() => {
-  const g = autoGroup(), t = autoList(g);
-  autoRotate(t); autoScale(t); autoAlign(t);
+const runAuto = (steps, fn) => async () => {
+  if (!pages.length || busy) return;
+  const g = autoGroup(), t = autoList(g); if (!t.length) return;
+  setBusy(true, 'Automatik läuft …');
+  prog = { total: steps * t.length, done: 0, t0: performance.now(), last: 0 }; setProgress(0);
+  await new Promise(r => setTimeout(r, 30));
+  try { await fn(t, g); } finally { prog = null; setBusy(false); syncUI(); draw(); drawAllThumbs(); }
+};
+$('aAll').onclick = runAuto(W_ROT + 2, async (t, g) => {
+  await autoRotate(t); await autoScale(t); await autoAlign(t);
   setStatus(`Automatik angewendet: ${GROUP[g]} (${t.length}).`);
 });
-$('aRot').onclick = withBusy(() => { const g = autoGroup(), t = autoList(g); autoRotate(t); setStatus(`Gerade gedreht: ${GROUP[g]} (${t.length}).`); });
-$('aScale').onclick = withBusy(() => { const g = autoGroup(), t = autoList(g); autoScale(t); setStatus(`Grösse bestimmt: ${GROUP[g]} (${t.length}).`); });
-$('aAlign').onclick = withBusy(() => { const g = autoGroup(), t = autoList(g); autoAlign(t); setStatus(`Ausgerichtet: ${GROUP[g]} (${t.length}).`); });
+$('aRot').onclick = runAuto(W_ROT, async (t, g) => { await autoRotate(t); setStatus(`Gerade gedreht: ${GROUP[g]} (${t.length}).`); });
+$('aScale').onclick = runAuto(1, async (t, g) => { await autoScale(t); setStatus(`Grösse bestimmt: ${GROUP[g]} (${t.length}).`); });
+$('aAlign').onclick = runAuto(1, async (t, g) => { await autoAlign(t); setStatus(`Ausgerichtet: ${GROUP[g]} (${t.length}).`); });
 // Split-Buttons: ▾ klappt das Menü auf (nur eines gleichzeitig); Auswahl oder Klick daneben schliesst
 const splitMenus = [];
 function setSeg(seg, btn) {

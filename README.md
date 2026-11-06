@@ -1,6 +1,6 @@
 # IoTools
 
-Notenscan-Nachbearbeitung: Eine statische HTML-Seite (`index.html`), die gescannte Notenblätter nachbearbeitet. Die Verarbeitung läuft vollständig im Browser.
+PDF-Nachbearbeitung (optimiert für Musiknoten): Eine statische HTML-Seite (`index.html`), die Scans manipulieren kann. Die Verarbeitung läuft vollständig im Browser.
 
 ## Verwendung
 
