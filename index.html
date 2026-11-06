@@ -456,20 +456,13 @@ function analyze(p) {
     const mB = sB / wB, mF = (sum - sB) / wF, bw = wB * wF * (mB - mF) * (mB - mF);
     if (bw > best) { best = bw; thr = i; }
   }
-  // Tintenmaske; zusammenhängende dunkle Flächen, die den Bildrand berühren (Scan-Schatten), werden entfernt
+  // Tintenmaske; Scan-Schatten (breite, durchgehend dunkle Bänder) werden entfernt.
+  // Inhalt, der den Bildrand berührt (abgeschnittene Notenzeilen), bleibt erhalten.
   const mk = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) mk[i] = g[i] <= thr ? 1 : 0;
-  const stack = [];
-  const seed = i => { if (mk[i] === 1) { mk[i] = 0; stack.push(i); } };
-  for (let xx = 0; xx < w; xx++) for (let t2 = 0; t2 < 2; t2++) { seed(t2 * w + xx); seed((h - 1 - t2) * w + xx); }
-  for (let yy = 0; yy < h; yy++) for (let t2 = 0; t2 < 2; t2++) { seed(yy * w + t2); seed(yy * w + (w - 1 - t2)); }
-  while (stack.length) {
-    const i = stack.pop(), xx = i % w, yy = (i / w) | 0;
-    if (xx > 0) seed(i - 1);
-    if (xx < w - 1) seed(i + 1);
-    if (yy > 0) seed(i - w);
-    if (yy < h - 1) seed(i + w);
-  }
+  const sh = shadowBands(mk, null, w, h, Math.max(3, Math.round(w * 1.5 / 210)));
+  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (sh.col[xx] || sh.row[yy]) mk[yy * w + xx] = 0;
+  p.shadow = { col: sh.col, row: sh.row, w, h };   // für measure(): Schatten liegen parallel zum Scanrand
   const mx = Math.round(w * 0.01), my = Math.round(h * 0.01);
   let n = 0;
   for (let yy = my; yy < h - my; yy++) for (let xx = mx; xx < w - mx; xx++) if (mk[yy * w + xx] === 1) n++;
@@ -517,48 +510,170 @@ function detectAngle(p) {
   return Math.max(-3, Math.min(3, Math.round(bestA * 100) / 100));
 }
 
-// Inhalts-Rahmen (mm rel. Seitenmitte) bei dx=dy=0, mit Percentil-Beschneidung
-function inkBox(p) {
-  const { X, Y, n } = inkMm(p);
-  if (n < 50) return null;
-  const s = Math.sin(rad(p.rot)), c = Math.cos(rad(p.rot));
-  const xs = new Float32Array(n), ys = new Float32Array(n);
-  for (let i = 0; i < n; i++) { xs[i] = X[i] * c - Y[i] * s; ys[i] = X[i] * s + Y[i] * c; }
-  xs.sort(); ys.sort();
-  const lo = Math.floor(n * 0.003), hi = Math.min(n - 1, Math.ceil(n * 0.997));
-  return { L: xs[lo], R: xs[hi], T: ys[lo], B: ys[hi] };
+// Scan-Schatten: Spalten bzw. Zeilen, die überwiegend dunkel sind, und zwar über eine Breite von
+// mindestens minRun Pixeln. Notenlinien, Taktstriche und Hälse sind dünn und fallen nicht darunter.
+function shadowBands(mk, inside, w, h, minRun, ratio = 0.4) {
+  const cd = new Uint32Array(w), ci = new Uint32Array(w), rd = new Uint32Array(h), ri = new Uint32Array(h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x; if (inside && !inside[i]) continue;
+    ci[x]++; ri[y]++; if (mk[i]) { cd[x]++; rd[y]++; }
+  }
+  const bands = (dk, inn, n) => {
+    const f = new Uint8Array(n); let s = -1;
+    for (let k = 0; k <= n; k++) {
+      const on = k < n && inn[k] > 0 && dk[k] > ratio * inn[k];
+      if (on && s < 0) s = k;
+      if (!on && s >= 0) { if (k - s >= minRun) f.fill(1, s, k); s = -1; }
+    }
+    return f;
+  };
+  return { col: bands(cd, ci, w), row: bands(rd, ri, h) };
+}
+const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[s.length >> 1] : 0; };
+
+// Inhalts-Rahmen (mm rel. Seitenmitte, bei dx=dy=0, Drehung angewendet) über die Notenzeilen:
+// 1. Seite gedreht rastern, 2. Notenlinien finden (lange, dünne waagrechte Läufe, je 5 im gleichen Abstand),
+// 3. von den Notenzeilen aus angrenzende Tinte dazunehmen (Titel, Text, Hilfslinien, Klammern).
+// Nichts wird abgeschnitten: Notenlinien bis an den Scanrand zählen ganz. Ohne Notenzeilen: alle Tinte.
+function measure(p) {
+  if (p.src.kind === 'blank') return null;
+  const img = p.prev, { fx, fy } = factors(p), a = rad(p.rot + p.q);
+  const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+  const bw = fx * ca + fy * sa, bh = fx * sa + fy * ca;   // gedrehter Scan, mm
+  const r = 1500 / bw;                                   // Pixel pro mm im Analyseraster
+  const W = Math.max(1, Math.round(bw * r)), H = Math.max(1, Math.round(bh * r));
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d', { willReadFrequently: true });
+  x.translate(W / 2, H / 2); x.rotate(a); x.scale(fx * r / img.width, fy * r / img.height);
+  x.drawImage(img, -img.width / 2, -img.height / 2);
+  // Scan-Schatten (im ungedrehten Scan erkannt) und weisse Rechtecke ausblenden, nur auf dem Scan
+  x.globalCompositeOperation = 'source-atop'; x.fillStyle = '#fff';
+  const S = p.shadow;
+  if (S) {
+    const sx = img.width / S.w, sy = img.height / S.h;
+    const runs = (f, cb) => { let s = -1; for (let k = 0; k <= f.length; k++) { const on = k < f.length && f[k]; if (on && s < 0) s = k; if (!on && s >= 0) { cb(s, k); s = -1; } } };
+    runs(S.col, (a0, a1) => x.fillRect(a0 * sx - img.width / 2, -img.height / 2, (a1 - a0) * sx, img.height));
+    runs(S.row, (a0, a1) => x.fillRect(-img.width / 2, a0 * sy - img.height / 2, img.width, (a1 - a0) * sy));
+  }
+  for (const l of rectLayers(p)) {
+    x.beginPath();
+    l.poly.forEach(([u, v], i) => { const X = (u - .5) * img.width, Y = (v - .5) * img.height; i ? x.lineTo(X, Y) : x.moveTo(X, Y); });
+    x.closePath(); x.fill();
+  }
+  const d = x.getImageData(0, 0, W, H).data, N = W * H;
+  const inside = new Uint8Array(N), gray = new Uint8Array(N), hist = new Uint32Array(256);
+  for (let i = 0; i < N; i++) {
+    if (d[4 * i + 3] < 128) continue;
+    inside[i] = 1;
+    const v = (d[4 * i] * 0.299 + d[4 * i + 1] * 0.587 + d[4 * i + 2] * 0.114) | 0;
+    gray[i] = v; hist[v]++;
+  }
+  // Otsu-Schwelle über den Scan
+  let tot = 0, sum = 0; for (let i = 0; i < 256; i++) { tot += hist[i]; sum += i * hist[i]; }
+  let wB = 0, sB = 0, best = -1, thr = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i]; if (!wB) continue;
+    const wF = tot - wB; if (!wF) break;
+    sB += i * hist[i];
+    const mB = sB / wB, mF = (sum - sB) / wF, b = wB * wF * (mB - mF) * (mB - mF);
+    if (b > best) { best = b; thr = i; }
+  }
+  const ink = new Uint8Array(N);
+  let nInk = 0;
+  for (let i = 0; i < N; i++) if (inside[i] && gray[i] <= thr) { ink[i] = 1; nInk++; }
+  if (nInk < N * 0.0005) return null;   // praktisch leer
+  const sh = shadowBands(ink, inside, W, H, Math.round(1.5 * r));
+  const rowIn = new Uint32Array(H);
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const i = y * W + xx;
+    if (inside[i]) rowIn[y]++;
+    if (ink[i] && (sh.col[xx] || sh.row[y])) ink[i] = 0;
+  }
+
+  // Notenlinien-Kandidaten: pro Zeile der längste dunkle Lauf (kleine Lücken erlaubt)
+  const gapTol = Math.max(2, Math.round(W * 0.006));
+  const cs = new Int32Array(H).fill(-1), ce = new Int32Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = -1, last = -1, bs = -1, be = -1;
+    for (let xx = 0; xx < W; xx++) {
+      if (!ink[y * W + xx]) continue;
+      if (s < 0 || xx - last > gapTol) s = xx;
+      last = xx;
+      if (last - s > be - bs) { bs = s; be = last; }
+    }
+    if (bs >= 0 && be - bs + 1 >= 0.25 * rowIn[y]) { cs[y] = bs; ce[y] = be; }
+  }
+  // benachbarte Kandidatenzeilen zu Linien zusammenfassen; dicke Balken sind keine Notenlinien
+  const maxThick = Math.max(3, Math.round(0.8 * r)), lines = [];
+  for (let y = 0; y < H; y++) {
+    if (cs[y] < 0) continue;
+    let y1 = y, s = cs[y], e = ce[y];
+    while (y1 + 1 < H && (cs[y1 + 1] >= 0 || (y1 + 2 < H && cs[y1 + 2] >= 0 && cs[y1 + 1] < 0))) {
+      y1++; if (cs[y1] >= 0) { s = Math.min(s, cs[y1]); e = Math.max(e, ce[y1]); }
+    }
+    if (y1 - y + 1 <= maxThick) lines.push({ y: (y + y1) / 2, s, e });
+    y = y1;
+  }
+  // Notenzeilen: 5 Linien mit gleichmässigem Abstand
+  const staves = [], minD = 0.8 * r, maxD = 5 * r;
+  for (let i = 0; i + 4 < lines.length;) {
+    const L5 = lines.slice(i, i + 5), gaps = [1, 2, 3, 4].map(j => L5[j].y - L5[j - 1].y), md = median(gaps);
+    if (md >= minD && md <= maxD && gaps.every(g => Math.abs(g - md) <= 0.25 * md + 1)) {
+      staves.push({ top: L5[0].y, bot: L5[4].y, s: Math.min(...L5.map(l => l.s)), e: Math.max(...L5.map(l => l.e)), d: md });
+      i += 5;
+    } else i++;
+  }
+
+  let X0, X1, Y0, Y1;
+  const rowCnt = (x0, x1) => { const c = new Uint32Array(H); for (let y = 0; y < H; y++) for (let xx = x0; xx <= x1; xx++) c[y] += ink[y * W + xx]; return c; };
+  const colCnt = (y0, y1) => { const c = new Uint32Array(W); for (let y = y0; y <= y1; y++) for (let xx = 0; xx < W; xx++) c[xx] += ink[y * W + xx]; return c; };
+  // von [lo, hi] aus wachsen, solange die Lücke zur nächsten Tinte höchstens gap ist
+  const grow = (cnt, lo, hi, gap, minC) => {
+    let l = lo, g = 0; for (let k = lo - 1; k >= 0; k--) { if (cnt[k] >= minC) { l = k; g = 0; } else if (++g > gap) break; }
+    let h2 = hi; g = 0; for (let k = hi + 1; k < cnt.length; k++) { if (cnt[k] >= minC) { h2 = k; g = 0; } else if (++g > gap) break; }
+    return [l, h2];
+  };
+  if (staves.length) {
+    const dS = median(staves.map(s => s.d));
+    X0 = Math.min(...staves.map(s => s.s)); X1 = Math.max(...staves.map(s => s.e));
+    Y0 = Math.floor(Math.min(...staves.map(s => s.top))); Y1 = Math.ceil(Math.max(...staves.map(s => s.bot)));
+    // Lücken bis 15 Linienabstände nach oben/unten (Titel, Komponist, Liedtext), 4 seitlich (Klammern, Namen);
+    // eine Zeile/Spalte zählt erst ab ca. 0,8 mm Tinte, damit einzelne Staubpunkte nichts aufblähen
+    const minC = Math.max(4, Math.ceil(0.8 * r));
+    [Y0, Y1] = grow(rowCnt(X0, X1), Y0, Y1, Math.round(15 * dS), minC);
+    [X0, X1] = grow(colCnt(Y0, Y1), X0, X1, Math.round(4 * dS), minC);
+  } else {
+    // keine Notenzeilen erkannt: alle Tinte (ohne Schatten), einzelne Staubpunkte zählen nicht
+    const rc = rowCnt(0, W - 1), cc = colCnt(0, H - 1);
+    Y0 = rc.findIndex(c => c >= 3); Y1 = H - 1 - [...rc].reverse().findIndex(c => c >= 3);
+    X0 = cc.findIndex(c => c >= 3); X1 = W - 1 - [...cc].reverse().findIndex(c => c >= 3);
+    if (Y0 < 0 || X0 < 0) return null;
+  }
+  return { L: X0 / r - bw / 2, R: (X1 + 1) / r - bw / 2, T: Y0 / r - bh / 2, B: (Y1 + 1) / r - bh / 2, staves: staves.length };
 }
 
 function autoRotate(list) { for (const p of list) p.rot = detectAngle(p); }
 
-// Faktor an der grössten der mittleren Seite(n) bestimmen, gleich für alle Seiten
+// Gemeinsamer Faktor: alle Seiten messen; die breiteste und die höchste bestimmen ihn,
+// sodass keine Seite über den Rand ragt (Grösse pro Seite wird mitberücksichtigt). Keine Streckung.
 function autoScale() {
-  const n = pages.length; if (!n) return;
-  const idx = n % 2 ? [n >> 1] : [n / 2 - 1, n / 2];
+  if (!pages.length) return;
   const sv = { ...G };
   G.scale = 100; G.stx = 0; G.sty = 0;
-  let best = null;
-  for (const i of idx) {
-    const pk = pages[i].k; pages[i].k = 1;   // Einzelseiten-Faktor bleibt ausser Betracht
-    const b = inkBox(pages[i]);
-    pages[i].k = pk;
-    if (b) { const w = b.R - b.L, h = b.B - b.T; if (!best || w * h > best.w * best.h) best = { w, h }; }
+  let maxW = 0, maxH = 0;
+  for (const p of pages) {
+    const b = measure(p);
+    if (b) { maxW = Math.max(maxW, b.R - b.L); maxH = Math.max(maxH, b.B - b.T); }
   }
   Object.assign(G, sv);
-  if (!best) return;
-  const m = Math.max(0, parseFloat($('mR').value) || 0);
-  const aw = A4W - 2 * m, ah = A4H - 2 * m;
-  const s = Math.min(aw / best.w, ah / best.h);
-  const slackX = aw / (best.w * s) - 1, slackY = ah / (best.h * s) - 1; // eine Dimension ist 0
-  // Streckung um höchstens 10 % in der Dimension mit Luft; ausgedrückt nur über Grösse und Höhe
-  const sx = Math.min(slackX, 0.10), sy = Math.min(slackY, 0.10);
-  G.scale = Math.floor(s * (1 + sx) * 10000) / 100;
-  G.stx = 0;
-  G.sty = Math.floor(((1 + sy) / (1 + sx) - 1) * 1000) / 10;
+  if (!maxW || !maxH) return;
+  const m = margin(), aw = A4W - 2 * m, ah = A4H - 2 * m;
+  G.scale = Math.floor(Math.min(aw / maxW, ah / maxH) * 10000) / 100;
+  G.stx = 0; G.sty = 0;
 }
 
 function autoAlign(list) {
-  const boxes = list.map(p => ({ p, b: inkBox(p) })).filter(o => o.b);
+  const boxes = list.map(p => ({ p, b: measure(p) })).filter(o => o.b);
   for (const { p, b } of boxes) {   // immer zentriert
     p.dx = -(b.L + b.R) / 2;
     p.dy = -(b.T + b.B) / 2;
@@ -989,7 +1104,12 @@ document.addEventListener('keydown', e => {
 const gIn = (id, key) => $(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (isFinite(v)) { G[key] = key === 'scale' ? Math.max(10, v) : v; draw(); drawAllThumbs(); } });
 gIn('gScale', 'scale'); gIn('gSty', 'sty');   // Breite folgt aus «Grösse», «Höhe zusätzlich» darf negativ sein
 
-const withBusy = fn => () => { if (!pages.length) return; document.body.style.cursor = 'progress'; setTimeout(() => { fn(); document.body.style.cursor = ''; syncUI(); draw(); drawAllThumbs(); }, 10); };
+// Automatik sperrt die Oberfläche (Overlay), bis sie fertig ist
+const withBusy = fn => () => {
+  if (!pages.length || busy) return;
+  setBusy(true, 'Automatik läuft …');
+  setTimeout(() => { try { fn(); } finally { setBusy(false); syncUI(); draw(); drawAllThumbs(); } }, 50);
+};
 $('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
 // Menü: Seitenauswahl aus dem Umschalter; «Grösse» ist ein gemeinsamer Faktor und gilt immer für alle
 const autoGroup = () => { const b = document.querySelector('#aSeg .on'); return b ? b.dataset.g : 'all'; };
