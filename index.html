@@ -57,7 +57,8 @@ button:disabled{opacity:.4;cursor:default}
 input::placeholder{color:var(--muted);font-style:italic}
 .menu .sep{height:1px;background:var(--line);margin:4px 2px}
 #tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center}
-#tools button{font-size:13px;padding:4px 8px}
+#tools button,#tools select{font-size:13px;padding:4px 8px}
+#tMove{display:flex;align-items:center;gap:6px;font-size:13px}
 .tsep{width:1px;align-self:stretch;margin:2px 4px;background:var(--line)}
 .thumb.dragging{opacity:.4}
 .thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
@@ -97,6 +98,14 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
   <section id="stage">
     <div id="empty">Scans (PDF oder Bilder) hierher ziehen<br>oder rechts «Dateien öffnen» wählen.</div>
     <div id="tools">
+      <label id="tMove" title="Inhalt mit der Maus ziehen oder mit den Pfeiltasten verschieben (0,2 mm, mit Shift 1 mm)">Verschieben
+        <select id="dSel">
+          <option value="sel">Markierte Seiten</option>
+          <option value="odd">Alle ungeraden</option>
+          <option value="even">Alle geraden</option>
+          <option value="all">Alle Seiten</option>
+        </select></label>
+      <i class="tsep"></i>
       <button id="tDup" title="Aktive Seite duplizieren; die Kopie kommt direkt dahinter">Duplizieren</button>
       <i class="tsep"></i>
       <button id="tSplitPrep" title="Waagrechten Strich auf der aktiven Seite zeigen">Teilen vorbereiten</button>
@@ -157,15 +166,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
       </div>
     </div>
 
-    <h3>Verschieben</h3>
-    <div class="row"><label>Verschieben wirkt auf</label>
-      <select id="dSel">
-        <option value="sel">Markierte Seiten</option>
-        <option value="odd">Alle ungeraden</option>
-        <option value="even">Alle geraden</option>
-        <option value="all">Alle Seiten</option>
-      </select></div>
-    <p class="hint">Der rot gestrichelte Rahmen zeigt den Rand. Alles ausserhalb wird weiss und auch im Export entfernt. Inhalt mit der Maus ziehen. Pfeiltasten verschieben um 0,2 mm (mit Shift 1 mm). Der Regler unter den Seiten dreht um ±3° (bei mehreren Seiten werden alle gleich weitergedreht).</p>
 
     <h3>Export</h3>
     <div class="row"><label>Modus</label>
@@ -912,6 +912,8 @@ $('rM').onclick = () => pages[cur] && setRot(pages[cur].rot + 0.05);
 $('rP').onclick = () => pages[cur] && setRot(pages[cur].rot - 0.05);
 $('rReset').onclick = () => { targetsFor('sel').forEach(t => { t.rot = 0; }); syncUI(); draw(); };
 
+// nach der Wahl Fokus weg, damit die Pfeiltasten wieder den Inhalt verschieben
+$('dSel').onchange = e => e.target.blur();
 function shift(ddx, ddy) {
   const sel = $('dSel').value;
   targetsFor(sel).forEach(p => { p.dx += ddx; p.dy += ddy; });
@@ -1022,6 +1024,7 @@ function updateTools() {
   $('tPasteDone').disabled = mode !== 'place';
   $('tCancel').disabled = !(mode || clip);
   $('tDup').disabled = !free;
+  $('dSel').disabled = !!mode;
   $('tRect').disabled = !has || !!mode;
   $('tRectDel').disabled = !(has && rectMode && !mode && rectLayers(pages[cur]).length);
   // Während Teilen, Ausschneiden-Ziehen und Platzieren ist alles andere gesperrt
