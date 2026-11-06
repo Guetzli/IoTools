@@ -46,6 +46,12 @@ button:disabled{opacity:.4;cursor:default}
 .menu[hidden]{display:none}
 .menu button{border:none;background:transparent;text-align:left;padding:7px 10px}
 .menu button:hover{background:var(--bg)}
+.menu .seg{display:flex;margin:2px 2px 6px}
+.menu .seg button{flex:1;text-align:center;font-size:12px;padding:4px 2px;border:1px solid var(--line);border-radius:0;margin-left:-1px;background:var(--panel)}
+.menu .seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
+.menu .seg button:last-child{border-radius:0 6px 6px 0}
+.menu .seg button.on{background:var(--acc);color:var(--accfg);border-color:var(--acc);position:relative}
+.menu .sep{height:1px;background:var(--line);margin:4px 2px}
 #tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .thumb.dragging{opacity:.4}
 .thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
@@ -118,9 +124,14 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <div class="split" id="aSplit">
       <button id="aAll" class="primary main" title="Gerade drehen, Grösse und Ausrichten nacheinander">Automatisch alles</button><button id="aMore" class="primary more" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
       <div class="menu" id="aMenu" role="menu" hidden>
+        <div class="seg" id="aSeg" role="radiogroup" aria-label="Seiten">
+          <button data-g="all" role="radio">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
+        </div>
+        <button id="aAllG" role="menuitem">Alles</button>
         <button id="aRot" role="menuitem">Gerade drehen</button>
-        <button id="aScale" role="menuitem">Grösse</button>
         <button id="aAlign" role="menuitem">Ausrichten</button>
+        <div class="sep"></div>
+        <button id="aScale" role="menuitem">Grösse (immer alle Seiten)</button>
       </div>
     </div>
     <div class="split" id="rSplit">
@@ -980,17 +991,34 @@ gIn('gScale', 'scale'); gIn('gSty', 'sty');   // Breite folgt aus «Grösse», �
 
 const withBusy = fn => () => { if (!pages.length) return; document.body.style.cursor = 'progress'; setTimeout(() => { fn(); document.body.style.cursor = ''; syncUI(); draw(); drawAllThumbs(); }, 10); };
 $('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
-$('aRot').onclick = withBusy(() => autoRotate(pages));
-$('aScale').onclick = withBusy(() => autoScale());
-$('aAlign').onclick = withBusy(() => autoAlign(pages));
+// Menü: Seitenauswahl aus dem Umschalter; «Grösse» ist ein gemeinsamer Faktor und gilt immer für alle
+const autoGroup = () => { const b = document.querySelector('#aSeg .on'); return b ? b.dataset.g : 'all'; };
+$('aAllG').onclick = withBusy(() => {
+  const g = autoGroup();
+  if (g === 'all') autoAll(0);
+  else { const t = targetsFor(g); autoRotate(t); autoAlign(t); }   // Teilmenge: ohne Grösse
+  setStatus(`Automatik angewendet: ${GROUP[g]}${g === 'all' ? '' : ' (drehen und ausrichten)'}.`);
+});
+$('aRot').onclick = withBusy(() => { const g = autoGroup(), t = targetsFor(g); autoRotate(t); setStatus(`Gerade gedreht: ${GROUP[g]} (${t.length}).`); });
+$('aAlign').onclick = withBusy(() => { const g = autoGroup(), t = targetsFor(g); autoAlign(t); setStatus(`Ausgerichtet: ${GROUP[g]} (${t.length}).`); });
+$('aScale').onclick = withBusy(() => { autoScale(); setStatus('Grösse für alle Seiten bestimmt.'); });
 // Split-Buttons: ▾ klappt das Menü auf (nur eines gleichzeitig); Auswahl oder Klick daneben schliesst
 const splitMenus = [];
+function setSeg(seg, btn) {
+  seg.querySelectorAll('button').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+}
 document.querySelectorAll('.split').forEach(root => {
   const more = root.querySelector('.more'), menu = root.querySelector('.menu');
   const set = open => { menu.hidden = !open; more.setAttribute('aria-expanded', open); };
   splitMenus.push(set);
-  more.onclick = e => { e.stopPropagation(); const open = menu.hidden; splitMenus.forEach(s => s(false)); set(open); };
-  menu.addEventListener('click', () => set(false));
+  const seg = menu.querySelector('.seg');
+  more.onclick = e => {
+    e.stopPropagation(); const open = menu.hidden; splitMenus.forEach(s => s(false)); set(open);
+    if (open && seg) setSeg(seg, seg.firstElementChild);   // Seitenauswahl startet immer bei «Alle»
+  };
+  if (seg) seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setSeg(seg, b); });
+  // Nur eine Aktion schliesst das Menü, der Seitenumschalter nicht
+  menu.addEventListener('click', e => { if (e.target.closest('[role=menuitem]')) set(false); });
   document.addEventListener('click', e => { if (!root.contains(e.target)) set(false); });
 });
 
