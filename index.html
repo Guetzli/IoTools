@@ -259,6 +259,8 @@ async function addImage(f) {
 
 // Seiten werden auf mehrere pdf.js-Worker verteilt (je einer pro Dokumentkopie), so viele wie sinnvoll:
 // höchstens Kerne − 1, höchstens 8. Übernommen werden die Seiten in ihrer Reihenfolge.
+// Promise, das von aussen erfüllt wird (Seiten fertig in beliebiger Reihenfolge, übernommen in Reihenfolge)
+const deferred = () => { let res, rej; const pr = new Promise((a, b) => { res = a; rej = b; }); return { pr, res, rej }; };
 let anaPool = null;
 // Vorschau als ImageBitmap an einen Worker; dort verkleinern, auslesen und analysieren (braucht OffscreenCanvas)
 async function analyzeInWorker(c) {
@@ -298,7 +300,7 @@ async function addPdf(f) {
   const first = await open(), n = first.numPages, pxW = pdfMaxImageWidth(bytes);
   const k = Math.max(1, Math.min(n, 8, (navigator.hardwareConcurrency || 2) - 1));
   const docs = [first, ...await Promise.all(Array.from({ length: k - 1 }, open))];
-  const done = Array.from({ length: n }, () => { let res, rej; const pr = new Promise((a, b) => { res = a; rej = b; }); return { pr, res, rej }; });
+  const done = Array.from({ length: n }, deferred);
   let next = 0, rendered = 0;
   const run = async doc => {
     while (next < n) {
@@ -1299,50 +1301,94 @@ async function loadSource(p, cache) {
   return c;
 }
 
+// Eine Seite für den Export rechnen: Originale laden, auf A4 zeichnen, als PNG oder JPEG kodieren.
+// null = leere Seite ohne Inhalt. cache: pdf.js-Dokumente dieses Export-Strangs (eigene Worker).
+// Zeichnen und Kodieren im Worker (OffscreenCanvas): dieselben Zeichenfunktionen wie im Hauptthread.
+// Die Seite geht schlank hinüber (ohne Vorschau, Quelldaten, DOM), die Bilder als ImageBitmap.
+function makeRenderWorker() {
+  const src = [`const A4W = ${A4W}, A4H = ${A4H}, MARGIN0 = ${MARGIN0}`, 'const rad = ' + rad, 'const margin = ' + margin,
+    setPageTransform, renderPage, renderContent].map(String).join(';') + `;
+onmessage = async e => {
+  const { id, page, bmps, ppm, type, quality } = e.data;
+  try {
+    const W = Math.round(A4W * ppm), H = Math.round(A4H * ppm), oc = new OffscreenCanvas(W, H);
+    renderPage(oc.getContext('2d'), page, W / A4W, q => bmps[q.img]);
+    bmps.forEach(b => b.close());
+    const buf = await (await oc.convertToBlob({ type, quality })).arrayBuffer();
+    postMessage({ id, buf }, [buf]);
+  } catch (err) { postMessage({ id, err: String(err) }); }
+};`;
+  const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  w.wait = new Map(); w.id = 0;
+  w.onmessage = e => { const f = w.wait.get(e.data.id); w.wait.delete(e.data.id); e.data.err ? f.rej(new Error(e.data.err)) : f.res(new Uint8Array(e.data.buf)); };
+  w.onerror = e => { e.preventDefault(); w.wait.forEach(f => f.rej(new Error('Export-Worker: ' + (e.message || 'Fehler')))); w.wait.clear(); w.broken = true; };
+  return w;
+}
+async function renderInWorker(w, p, imgs, ppm, type, quality) {
+  const srcs = [...imgs.keys()];
+  const slim = q => ({ img: srcs.indexOf(q.src), rot: q.rot, q: q.q, dx: q.dx, dy: q.dy, k: q.k, sy: q.sy || 0, m: q.m,
+    layers: q.layers.map(l => l.t === 'rect' ? { t: 'rect', poly: l.poly } : { t: 'piece', clip: l.clip, ox: l.ox, oy: l.oy, snap: slim(l.snap) }) });
+  const bmps = await Promise.all(srcs.map(k => { const im = imgs.get(k); return im instanceof ImageBitmap ? im : createImageBitmap(im); }));
+  srcs.forEach(k => { if (k.kind === 'pdf') { const im = imgs.get(k); im.width = im.height = 1; } });   // grosse PDF-Renderings sofort freigeben
+  if (w.broken) throw new Error('Export-Worker nicht verfügbar');
+  const id = ++w.id;
+  return new Promise((res, rej) => { w.wait.set(id, { res, rej }); w.postMessage({ id, page: slim(p), bmps, ppm, type, quality }, bmps); });
+}
+async function exportPage(p, cache, mode, dpi, qSmall, wk) {
+  if (p.src.kind === 'blank' && !p.layers.some(l => l.t === 'piece')) return null;
+  // Originale der Seite und aller eingefügten Stücke laden (rekursiv)
+  const imgs = new Map();
+  const preload = async q => {
+    if (!imgs.has(q.src)) imgs.set(q.src, await loadSource(q, cache));
+    for (const l of q.layers) if (l.t === 'piece') await preload(l.snap);
+  };
+  await preload(p);
+  // Auflösung: die feinste der beteiligten Scans (Pixel pro mm)
+  const finest = q => {
+    let m = 0;
+    if (q.src.kind !== 'blank') { const im = imgs.get(q.src), { fx, fy } = factors(q); m = Math.max(im.width / fx, im.height / fy); }
+    for (const l of q.layers) if (l.t === 'piece') m = Math.max(m, finest(l.snap));
+    return m;
+  };
+  let ppm = mode === 'small' ? dpi / 25.4 : (finest(p) || 300 / 25.4);
+  ppm = Math.min(ppm, 33); // ca. 840 dpi als Obergrenze
+  const png = mode === 'png' || (mode === 'auto' && pageLossless(p));
+  const type = png ? 'image/png' : 'image/jpeg', quality = mode === 'small' ? qSmall : 0.95;
+  if (wk) return { png, bytes: await renderInWorker(wk, p, imgs, ppm, type, quality) };
+  const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
+  renderPage(c.getContext('2d'), p, c.width / A4W, q => imgs.get(q.src) || q.prev);
+  imgs.forEach(im => im.close && im.close());
+  const blob = await new Promise(r => c.toBlob(r, type, quality));
+  c.width = c.height = 1;
+  return { png, bytes: new Uint8Array(await blob.arrayBuffer()) };
+}
+// Export parallel in mehreren Strängen (höchstens 4 wegen Speicher: je Seite zwei grosse Bilder);
+// in die PDF kommen die Seiten in ihrer Reihenfolge
 $('bExport').onclick = async () => {
   if (!pages.length || busy) return;
   if (!window.PDFLib) { setStatus('pdf-lib konnte nicht geladen werden (Internet?)'); return; }
   const mode = $('eMode').value, dpi = parseInt($('eDpi').value), qSmall = parseFloat($('eQ').value);
-  const n = pages.length, cache = new Map();
+  const list = pages.slice(), n = list.length;
+  const k = Math.max(1, Math.min(4, n, (navigator.hardwareConcurrency || 2) - 1));
+  const caches = Array.from({ length: k }, () => new Map()), done = list.map(deferred);
+  const wks = typeof OffscreenCanvas !== 'undefined' ? caches.map(makeRenderWorker) : [];
   setBusy(true, 'Export vorbereiten …');
   setProgress(0);
   $('bExport').disabled = true;
+  let next = 0;
+  const run = async (cache, j) => {
+    while (next < n) { const i = next++; try { done[i].res(await exportPage(list[i], cache, mode, dpi, qSmall, wks[j])); } catch (e) { done[i].rej(e); } }
+  };
+  const pool = Promise.all(caches.map(run)), t0 = performance.now();
   try {
     const doc = await PDFLib.PDFDocument.create();
     for (let i = 0; i < n; i++) {
-      const p = pages[i];
-      setProgress(i / n); setStatus(`Seite ${i + 1}/${n}`);
-      await new Promise(r => setTimeout(r, 10));
-      if (p.src.kind === 'blank' && !p.layers.some(l => l.t === 'piece')) { doc.addPage([595.28, 841.89]); continue; }
-      // Originale der Seite und aller eingefügten Stücke laden (rekursiv)
-      const imgs = new Map();
-      const preload = async q => {
-        if (!imgs.has(q.src)) imgs.set(q.src, await loadSource(q, cache));
-        for (const l of q.layers) if (l.t === 'piece') await preload(l.snap);
-      };
-      await preload(p);
-      // Auflösung: die feinste der beteiligten Scans (Pixel pro mm)
-      const finest = q => {
-        let m = 0;
-        if (q.src.kind !== 'blank') { const im = imgs.get(q.src), { fx, fy } = factors(q); m = Math.max(im.width / fx, im.height / fy); }
-        for (const l of q.layers) if (l.t === 'piece') m = Math.max(m, finest(l.snap));
-        return m;
-      };
-      let ppm = mode === 'small' ? dpi / 25.4 : (finest(p) || 300 / 25.4);
-      ppm = Math.min(ppm, 33); // ca. 840 dpi als Obergrenze
-      const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
-      renderPage(c.getContext('2d'), p, c.width / A4W, q => imgs.get(q.src) || q.prev);
-      imgs.forEach(im => im.close && im.close());
-      const png = mode === 'png' || (mode === 'auto' && pageLossless(p));
-      const blob = await new Promise(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', mode === 'small' ? qSmall : 0.95));
-      c.width = c.height = 1;
-      const bytesImg = new Uint8Array(await blob.arrayBuffer());
-      const emb = png ? await doc.embedPng(bytesImg) : await doc.embedJpg(bytesImg);
-      const pg = doc.addPage([595.28, 841.89]);
-      pg.drawImage(emb, { x: 0, y: 0, width: 595.28, height: 841.89 });
+      const r = await done[i].pr, pg = doc.addPage([595.28, 841.89]);
+      if (r) pg.drawImage(r.png ? await doc.embedPng(r.bytes) : await doc.embedJpg(r.bytes), { x: 0, y: 0, width: 595.28, height: 841.89 });
+      const el = performance.now() - t0, rest = el / (i + 1) * (n - i - 1);
+      setProgress((i + 1) / n); setStatus(`Seite ${i + 1}/${n}` + (el > 1500 && rest > 500 ? ` · noch ca. ${fmtDur(rest)}` : ''));
     }
     setProgress(1); setStatus(`Speichere PDF (${n} Seiten) …`);
-    cache.forEach(d => d.destroy && d.destroy());
     const bytes = await doc.save();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
@@ -1350,7 +1396,12 @@ $('bExport').onclick = async () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     setStatus(`Fertig: ${n} Seite(n), ${(bytes.length / 1048576).toFixed(1)} MB.`);
   } catch (e) { console.error(e); setStatus('Export-Fehler: ' + e.message); }
-  finally { setBusy(false); $('bExport').disabled = false; }
+  finally {
+    next = n; await pool.catch(() => {});
+    caches.forEach(c => c.forEach(d => d.destroy && d.destroy()));
+    wks.forEach(w => w.terminate());
+    setBusy(false); $('bExport').disabled = false;
+  }
 };
 
 new ResizeObserver(fitCanvas).observe($('stage'));
