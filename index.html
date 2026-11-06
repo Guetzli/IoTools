@@ -136,8 +136,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <div class="row"><label>Grösse (%)</label><input id="gGK" type="number" step="0.5" min="10" value="100"></div>
 
     <h3>Markierte Seiten</h3>
-    <div class="row"><label>Grösse (%)</label><input id="pK" type="number" step="0.5" min="10" value="100"></div>
-    <p class="hint">100 % = gemeinsamer Faktor. Gilt zusätzlich für alle markierten Seiten.</p>
     <div class="row btns"><button id="bReset">Zurücksetzen</button></div>
     <div class="row"><label>Verschieben wirkt auf</label>
       <select id="dSel">
@@ -750,7 +748,6 @@ function syncUI() {
   const sv = p ? -p.rot : 0;
   $('rot').value = sv;
   $('rotVal').textContent = (Math.abs(sv) < 0.005 ? 0 : sv).toFixed(2).replace('.', ',') + '°';
-  if (document.activeElement !== $('pK')) $('pK').value = p ? Math.round(p.k * 10000) / 100 : 100;
   const g0 = targetsFor($('gSel').value)[0];
   if (g0 && document.activeElement !== $('gGK')) $('gGK').value = Math.round(g0.k * 10000) / 100;
   document.querySelectorAll('[data-q]').forEach(b => {
@@ -984,10 +981,6 @@ $('aMore').onclick = e => { e.stopPropagation(); setAutoMenu($('aMenu').hidden);
 $('aMenu').addEventListener('click', () => setAutoMenu(false));
 document.addEventListener('click', e => { if (!$('aSplit').contains(e.target)) setAutoMenu(false); });
 $('bReset').onclick = () => { targetsFor('sel').forEach(p => { p.rot = 0; p.q = 0; p.dx = 0; p.dy = 0; p.k = 1; }); syncUI(); draw(); drawAllThumbs(); };
-$('pK').addEventListener('input', e => {
-  const v = parseFloat(e.target.value);
-  if (isFinite(v) && v >= 10) { targetsFor('sel').forEach(p => { p.k = v / 100; }); draw(); drawAllThumbs(); }
-});
 
 /* ---------- Seiten verwalten ---------- */
 function blankPage() {
