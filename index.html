@@ -11,7 +11,7 @@
 [hidden]{display:none!important}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif}
-#main{display:grid;grid-template-columns:250px 1fr 220px;height:100vh}
+#main{display:grid;grid-template-columns:250px 1fr 200px;height:100vh}
 aside{background:var(--panel);overflow:auto;padding:10px}
 #left{border-right:1px solid var(--line)}
 #right{border-left:1px solid var(--line)}
@@ -26,7 +26,8 @@ button:disabled{opacity:.4;cursor:default}
 .row label{flex:1;min-width:90px}
 .row input[type=number]{width:80px}
 .btns button{flex:1}
-#right .row input[type=number]{width:60px}
+#right .row input[type=number]{width:52px;padding:5px 6px}
+#right .row label{white-space:nowrap;min-width:0}
 #right select{max-width:100%}
 #eMode{width:100%}
 #right .seg button{flex:1 1 auto;font-size:11px;padding:4px 3px}
@@ -144,7 +145,7 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
 
     <h3>Seiten anpassen</h3>
     <div class="seg" id="pSeg" role="radiogroup" aria-label="Seiten">
-      <button data-g="all" role="radio" class="on" aria-checked="true">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
+      <button data-g="all" role="radio" class="on" aria-checked="true">Alle</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button><button data-g="sel" role="radio">Markierte</button>
     </div>
     <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" min="10" value="100"></div>
     <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
