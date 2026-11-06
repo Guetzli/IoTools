@@ -129,9 +129,8 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
         </div>
         <button id="aAllG" role="menuitem">Alles</button>
         <button id="aRot" role="menuitem">Gerade drehen</button>
+        <button id="aScale" role="menuitem" title="Alle: gemeinsamer Faktor. Sonst: Grösse pro Seite der gewählten Seiten">Grösse</button>
         <button id="aAlign" role="menuitem">Ausrichten</button>
-        <div class="sep"></div>
-        <button id="aScale" role="menuitem">Grösse (immer alle Seiten)</button>
       </div>
     </div>
     <div class="split" id="rSplit">
@@ -654,22 +653,25 @@ function measure(p) {
 
 function autoRotate(list) { for (const p of list) p.rot = detectAngle(p); }
 
-// Gemeinsamer Faktor: alle Seiten messen; die breiteste und die höchste bestimmen ihn,
-// sodass keine Seite über den Rand ragt (Grösse pro Seite wird mitberücksichtigt). Keine Streckung.
-function autoScale() {
-  if (!pages.length) return;
-  const sv = { ...G };
-  G.scale = 100; G.stx = 0; G.sty = 0;
+// Grösse: die Seiten der Liste messen; die breiteste und die höchste bestimmen den Faktor, sodass keine
+// davon über den Rand ragt. Keine Streckung.
+// - alle Seiten (list === pages): gemeinsamer Faktor unter «Alle Seiten gleich», Grösse pro Seite überall 100 %
+// - Teilmenge: Grösse pro Seite dieser Seiten (relativ zum gemeinsamen Faktor), die übrigen bleiben
+function autoScale(list = pages) {
+  if (!list.length) return;
+  const shared = list === pages, sv = { ...G }, ks = list.map(p => p.k);
+  if (shared) { G.scale = 100; G.stx = 0; G.sty = 0; }
+  list.forEach(p => { p.k = 1; });
   let maxW = 0, maxH = 0;
-  for (const p of pages) {
+  for (const p of list) {
     const b = measure(p);
     if (b) { maxW = Math.max(maxW, b.R - b.L); maxH = Math.max(maxH, b.B - b.T); }
   }
-  Object.assign(G, sv);
-  if (!maxW || !maxH) return;
-  const m = margin(), aw = A4W - 2 * m, ah = A4H - 2 * m;
-  G.scale = Math.floor(Math.min(aw / maxW, ah / maxH) * 10000) / 100;
-  G.stx = 0; G.sty = 0;
+  if (shared) Object.assign(G, sv);
+  if (!maxW || !maxH) { list.forEach((p, i) => { p.k = ks[i]; }); return; }
+  const m = margin(), s = Math.min((A4W - 2 * m) / maxW, (A4H - 2 * m) / maxH);
+  if (shared) { G.scale = Math.floor(s * 10000) / 100; G.stx = 0; G.sty = 0; }
+  else list.forEach(p => { p.k = Math.floor(s * 10000) / 10000; });
 }
 
 function autoAlign(list) {
@@ -1111,17 +1113,17 @@ const withBusy = fn => () => {
   setTimeout(() => { try { fn(); } finally { setBusy(false); syncUI(); draw(); drawAllThumbs(); } }, 50);
 };
 $('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
-// Menü: Seitenauswahl aus dem Umschalter; «Grösse» ist ein gemeinsamer Faktor und gilt immer für alle
+// Menü: Seitenauswahl aus dem Umschalter; bei «Alle» setzt «Grösse» den gemeinsamen Faktor
 const autoGroup = () => { const b = document.querySelector('#aSeg .on'); return b ? b.dataset.g : 'all'; };
+const autoList = g => g === 'all' ? pages : targetsFor(g);
 $('aAllG').onclick = withBusy(() => {
-  const g = autoGroup();
-  if (g === 'all') autoAll(0);
-  else { const t = targetsFor(g); autoRotate(t); autoAlign(t); }   // Teilmenge: ohne Grösse
-  setStatus(`Automatik angewendet: ${GROUP[g]}${g === 'all' ? '' : ' (drehen und ausrichten)'}.`);
+  const g = autoGroup(), t = autoList(g);
+  autoRotate(t); autoScale(t); autoAlign(t);
+  setStatus(`Automatik angewendet: ${GROUP[g]} (${t.length}).`);
 });
-$('aRot').onclick = withBusy(() => { const g = autoGroup(), t = targetsFor(g); autoRotate(t); setStatus(`Gerade gedreht: ${GROUP[g]} (${t.length}).`); });
-$('aAlign').onclick = withBusy(() => { const g = autoGroup(), t = targetsFor(g); autoAlign(t); setStatus(`Ausgerichtet: ${GROUP[g]} (${t.length}).`); });
-$('aScale').onclick = withBusy(() => { autoScale(); setStatus('Grösse für alle Seiten bestimmt.'); });
+$('aRot').onclick = withBusy(() => { const g = autoGroup(), t = autoList(g); autoRotate(t); setStatus(`Gerade gedreht: ${GROUP[g]} (${t.length}).`); });
+$('aScale').onclick = withBusy(() => { const g = autoGroup(), t = autoList(g); autoScale(t); setStatus(`Grösse bestimmt: ${GROUP[g]} (${t.length}).`); });
+$('aAlign').onclick = withBusy(() => { const g = autoGroup(), t = autoList(g); autoAlign(t); setStatus(`Ausgerichtet: ${GROUP[g]} (${t.length}).`); });
 // Split-Buttons: ▾ klappt das Menü auf (nur eines gleichzeitig); Auswahl oder Klick daneben schliesst
 const splitMenus = [];
 function setSeg(seg, btn) {
