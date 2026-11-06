@@ -114,7 +114,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" value="100"></div>
     <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
 
-    <h3>Automatik</h3>
     <div class="split" id="aSplit">
       <button id="aAll" class="primary">Alles automatisch</button><button id="aMore" class="primary" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
       <div class="menu" id="aMenu" role="menu" hidden>
@@ -124,7 +123,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
       </div>
     </div>
     <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
-    <p class="hint">«Grösse»: Der Faktor wird an der grössten der mittleren Seite(n) bestimmt (bei 10 Seiten Seite 5 und 6), sodass der Inhalt in die Fläche innerhalb des Rands passt, und gilt für alle Seiten. Hat der Inhalt in einer Dimension Luft, wird er dort zusätzlich um höchstens 10 % gestreckt. Eigene Werte kannst du oben in «Alle Seiten gleich» eintragen.</p>
 
     <h3>Seiten drehen / skalieren</h3>
     <div class="row"><label>Seiten</label>
