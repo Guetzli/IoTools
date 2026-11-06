@@ -30,9 +30,12 @@ button:disabled{opacity:.4;cursor:default}
 .thumb.sel{border-color:var(--acc)}
 .thumb.cur{box-shadow:0 0 0 2px var(--acc)}
 .thumb canvas{width:100%;display:block;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.thumb span{position:absolute;left:4px;top:2px;font-size:11px;line-height:1.2;background:rgba(0,0,0,.55);color:#fff;border-radius:3px;padding:0 4px}
+.thumb span{position:absolute;left:50%;transform:translateX(-50%);top:2px;font-size:11px;line-height:1.2;background:rgba(0,0,0,.55);color:#fff;border-radius:3px;padding:0 4px}
 .thumb .tdel{position:absolute;right:4px;top:2px;font-size:11px;line-height:1.2;padding:0 5px;border:none;border-radius:3px;background:rgba(0,0,0,.55);color:#fff}
 .thumb .tdel:hover{background:rgba(200,40,40,.95);border:none}
+.thumb .tadd{position:absolute;left:4px;top:2px;font-size:11px;line-height:1.2;padding:0 5px;border:none;border-radius:3px;background:rgba(0,0,0,.55);color:#fff}
+.thumb .tadd:hover{background:var(--acc);border:none}
+#tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .thumb.dragging{opacity:.4}
 .thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
 .thumb[data-drop=before]::before{top:-6px}
@@ -76,6 +79,14 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
 
   <section id="stage">
     <div id="empty">Scans (PDF oder Bilder) hierher ziehen<br>oder rechts «Dateien öffnen» wählen.</div>
+    <div id="tools">
+      <button id="tSplitPrep" title="Waagrechten Strich auf der aktiven Seite zeigen">Teilen vorbereiten</button>
+      <button id="tSplitDo" title="Seite am Strich teilen">Teilen ausführen</button>
+      <button id="tCut" title="Bereich auf der aktiven Seite aufziehen und ausschneiden">Ausschneiden</button>
+      <button id="tPaste" title="Ausgeschnittenen Bereich auf der aktiven Seite einfügen">Einfügen</button>
+      <button id="tPasteDone" title="Eingefügtes Stück fest auf der Seite platzieren">Einfügen abschliessen</button>
+      <button id="tCancel" title="Teilen, Ausschneiden oder Einfügen abbrechen">Abbrechen</button>
+    </div>
     <div id="views">
       <canvas id="cvL" class="pv" width="10" height="10"></canvas>
       <canvas id="cvR" class="pv" width="10" height="10"></canvas>
@@ -93,7 +104,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <h3>Dateien</h3>
     <div class="row"><button id="bOpen" class="primary">Dateien öffnen …</button></div>
     <input id="file" type="file" accept="application/pdf,image/*" multiple hidden>
-    <label class="row"><input type="checkbox" id="cAutoLoad" checked> Beim Laden automatisch bearbeiten</label>
     <label class="row"><input type="checkbox" id="cDual" checked> Doppelseite anzeigen</label>
 
     <h3>Alle Seiten gleich</h3>
@@ -173,7 +183,9 @@ let cur = -1;                 // aktive Seite (Index)
 let selSet = new Set();       // markierte Seiten (Seitenobjekte)
 let anchor = 0;               // Ankerseite für Shift-Auswahl
 const G = { scale: 100, stx: 0, sty: 0 };
-let rectMode = false, rubber = null, selRect = null;   // weisse Rechtecke
+let rectMode = false, rubber = null, selRect = null;   // weisse Rechtecke (selRect = Ebene)
+// Werkzeugleiste: mode = 'split' | 'cut' | 'place' | null; clip = ausgeschnittenes, noch nicht fertig eingefügtes Stück
+let mode = null, clip = null, placing = null, splitY = 0;
 
 function setStatus(t) { $('status').textContent = t; if (busy) $('busyMsg').textContent = t; }
 
@@ -198,7 +210,8 @@ function setProgress(f) {
 const PREV_LONG = 2200;
 
 function makePage(c, name, src) {
-  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, rects: [], aspect: c.height / c.width, ink: null, thumb: null };
+  // layers: in Reihenfolge gezeichnet: weisse Rechtecke {t:'rect', poly} und eingefügte Stücke {t:'piece', …}
+  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, layers: [], aspect: c.height / c.width, ink: null, thumb: null };
   analyze(p);
   pages.push(p);
   return p;
@@ -269,7 +282,6 @@ async function addFiles(list) {
       } catch (e) { console.error(e); setStatus('Fehler bei ' + f.name + ': ' + e.message); }
     }
     if (pages.length > first) {
-      if ($('cAutoLoad').checked) autoAll(first);
       selectOnly(first);
       setStatus(`${pages.length} Seite(n) geladen.`);
     }
@@ -315,22 +327,23 @@ function targetsFor(sel) {
 }
 
 /* ---------- Geometrie ---------- */
+// Ausgeschnittene Stücke tragen ihre eigenen, beim Ausschneiden eingefrorenen Werte (p.G)
 function factors(p) {
-  const k = G.scale / 100 * p.k, odd = p.q % 180 !== 0;
+  const g = p.G || G, k = g.scale / 100 * p.k, odd = p.q % 180 !== 0;
   // Breite/Höhe-Streckung gelten für die Seite; bei 90°/270° liegen die Bildachsen vertauscht
   return odd
-    ? { fx: A4W * k * (1 + G.sty / 100) / p.aspect, fy: A4W * k * (1 + G.stx / 100) }
-    : { fx: A4W * k * (1 + G.stx / 100), fy: A4W * k * (1 + G.sty / 100) * p.aspect };
+    ? { fx: A4W * k * (1 + g.sty / 100) / p.aspect, fy: A4W * k * (1 + g.stx / 100) }
+    : { fx: A4W * k * (1 + g.stx / 100), fy: A4W * k * (1 + g.sty / 100) * p.aspect };
 }
 
 // Bildkoordinaten -> Seite: Verschiebung, Drehung (grob + fein), Skalierung in Bildachsen
 function setPageTransform(ctx, p, ppm, img) {
   const W = A4W * ppm, H = A4H * ppm, odd = p.q % 180 !== 0;
   // Nach der Drehung bestimmt die waagrechte Seitenausdehnung den Grundmassstab (bei 90°/270° die Bildhöhe)
-  const k = G.scale / 100 * p.k, base = A4W * ppm / (odd ? img.height : img.width);
+  const g = p.G || G, k = g.scale / 100 * p.k, base = A4W * ppm / (odd ? img.height : img.width);
   ctx.translate(W / 2 + p.dx * ppm, H / 2 + p.dy * ppm);
   ctx.rotate(rad(p.rot + p.q));
-  ctx.scale(base * k * (1 + (odd ? G.sty : G.stx) / 100), base * k * (1 + (odd ? G.stx : G.sty) / 100));
+  ctx.scale(base * k * (1 + (odd ? g.sty : g.stx) / 100), base * k * (1 + (odd ? g.stx : g.sty) / 100));
 }
 
 // Punkt (u,v) in Bildkoordinaten (0..1) innerhalb eines konvexen Vierecks?
@@ -349,23 +362,14 @@ function mmToUV(p, X, Y) {
   return [0.5 + (X * c - Y * s) / fx, 0.5 + (X * s + Y * c) / fy];
 }
 
-function renderPage(ctx, p, ppm, img) {
+// imgOf(q) liefert das Bild zu einer Seite oder einem Stück: Vorschau (q.prev) oder im Export das Original
+function renderPage(ctx, p, ppm, imgOf = q => q.prev) {
   const W = A4W * ppm, H = A4H * ppm;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-  setPageTransform(ctx, p, ppm, img);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, -img.width / 2, -img.height / 2);
-  // Weisse Rechtecke (im Bildkoordinatensystem, wandern also mit dem Inhalt)
-  if (p.rects && p.rects.length) {
-    ctx.fillStyle = '#fff';
-    for (const r of p.rects) {
-      ctx.beginPath();
-      r.forEach(([u, v], i) => { const x = (u - .5) * img.width, y = (v - .5) * img.height; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-      ctx.closePath(); ctx.fill();
-    }
-  }
+  renderContent(ctx, p, ppm, imgOf);
   ctx.restore();
   // Alles ausserhalb des Rands weiss machen (entfernt Scan-Schatten, gilt auch im Export)
   const m = margin() * ppm;
@@ -377,6 +381,33 @@ function renderPage(ctx, p, ppm, img) {
   }
 }
 const margin = () => Math.max(0, parseFloat(document.getElementById('mR').value) || 0);
+
+// Scan und Ebenen einer Seite zeichnen; der Kontext steht im Seitenursprung (Pixel). Rekursiv für Stücke.
+function renderContent(ctx, p, ppm, imgOf) {
+  const img = imgOf(p);
+  ctx.save(); setPageTransform(ctx, p, ppm, img);
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  ctx.restore();
+  for (const l of p.layers) {
+    if (l.t === 'rect') {   // weisses Rechteck in Bildkoordinaten, wandert mit dem Inhalt
+      ctx.save(); setPageTransform(ctx, p, ppm, img);
+      ctx.fillStyle = '#fff'; ctx.beginPath();
+      l.poly.forEach(([u, v], i) => { const x = (u - .5) * img.width, y = (v - .5) * img.height; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.closePath(); ctx.fill(); ctx.restore();
+    } else if (l.t === 'piece') {   // eingefügtes Stück: Ausschnitt der eingefrorenen Ursprungsseite, verschoben
+      const c = l.clip, x = (c.x0 + A4W / 2) * ppm, y = (c.y0 + A4H / 2) * ppm, w = (c.x1 - c.x0) * ppm, h = (c.y1 - c.y0) * ppm;
+      ctx.save(); ctx.translate((l.ox + p.dx) * ppm, (l.oy + p.dy) * ppm);
+      ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+      ctx.fillStyle = '#fff'; ctx.fillRect(x, y, w, h);
+      renderContent(ctx, l.snap, ppm, imgOf);
+      ctx.restore();
+    }
+  }
+}
+const rectLayers = p => p.layers.filter(l => l.t === 'rect');
+// Seitenbereich (mm rel. Seitenmitte) -> weisses Rechteck in Bildkoordinaten dieser Seite
+const rectFromMm = (p, x0, y0, x1, y1) => ({ t: 'rect', poly: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([X, Y]) => mmToUV(p, X, Y)) });
+const cloneLayer = l => l.t === 'rect' ? { t: 'rect', poly: l.poly.map(pt => [...pt]) } : { ...l };
 
 /* ---------- Analyse ---------- */
 function analyze(p) {
@@ -430,7 +461,7 @@ function analyze(p) {
 
 // Tintenpunkte in mm relativ zur Seitenmitte (Seitendrehung q angewendet, feine Drehung noch nicht)
 function inkMm(p) {
-  const { fx, fy } = factors(p), rects = p.rects || [];
+  const { fx, fy } = factors(p), rects = rectLayers(p).map(l => l.poly);
   const all = p.ink.length / 2;
   const X = new Float32Array(all), Y = new Float32Array(all);
   const [qc, qs] = { 0: [1, 0], 90: [0, 1], 180: [-1, 0], 270: [0, -1] }[p.q];
@@ -536,26 +567,41 @@ function draw() {
       cv.classList.toggle('sel', !!p && idx !== cur && selSet.has(p));
       if (!p) { ctx.clearRect(0, 0, cv.width, cv.height); return; }
       const ppm = cv.width / A4W;
-      renderPage(ctx, p, ppm, p.prev);
+      renderPage(ctx, p, ppm);
       if (rectMode) {   // Rechtecke als Umriss zeigen (ausgewähltes rot), plus das gerade aufgezogene
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
         setPageTransform(ctx, p, ppm, p.prev);
         const M = ctx.getTransform(); ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.setLineDash([5, 3]); ctx.lineWidth = 1.5;
-        for (const r of p.rects) {
-          ctx.strokeStyle = r === selRect ? 'rgba(220,40,40,.95)' : 'rgba(30,110,255,.9)';
+        for (const l of rectLayers(p)) {
+          ctx.strokeStyle = l === selRect ? 'rgba(220,40,40,.95)' : 'rgba(30,110,255,.9)';
           ctx.beginPath();
-          r.forEach(([u, w], i) => {
+          l.poly.forEach(([u, w], i) => {
             const x = (u - .5) * p.prev.width, y = (w - .5) * p.prev.height;
             const X = M.a * x + M.c * y + M.e, Y = M.b * x + M.d * y + M.f;
             i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
           });
           ctx.closePath(); ctx.stroke();
         }
-        if (rubber && rubber.v === vi) {
-          ctx.strokeStyle = 'rgba(30,110,255,.9)';
-          ctx.strokeRect((rubber.X0 + A4W / 2) * ppm, (rubber.Y0 + A4H / 2) * ppm, (rubber.X1 - rubber.X0) * ppm, (rubber.Y1 - rubber.Y0) * ppm);
-        }
+        ctx.restore();
+      }
+      const lw = Math.max(1.5, cv.width / 400);
+      if (rubber && rubber.v === vi) {   // gerade aufgezogener Rahmen (weisses Rechteck oder Ausschneiden)
+        ctx.save(); ctx.setLineDash([5, 3]); ctx.lineWidth = lw;
+        ctx.strokeStyle = rubber.cut ? 'rgba(220,40,40,.95)' : 'rgba(30,110,255,.9)';
+        ctx.strokeRect((rubber.X0 + A4W / 2) * ppm, (rubber.Y0 + A4H / 2) * ppm, (rubber.X1 - rubber.X0) * ppm, (rubber.Y1 - rubber.Y0) * ppm);
+        ctx.restore();
+      }
+      if (mode === 'split' && idx === cur) {   // Teilungsstrich über die ganze Breite
+        const y = (splitY + A4H / 2) * ppm;
+        ctx.save(); ctx.fillStyle = 'rgba(220,40,40,.95)';
+        ctx.fillRect(0, y - lw, A4W * ppm, 2 * lw);
+        ctx.restore();
+      }
+      if (mode === 'place' && placing && placing.host === p) {   // Rahmen um das Stück, das gerade platziert wird
+        const c = placing.piece.clip, ox = placing.piece.ox + p.dx, oy = placing.piece.oy + p.dy;
+        ctx.save(); ctx.setLineDash([6, 4]); ctx.lineWidth = lw; ctx.strokeStyle = 'rgba(30,110,255,.95)';
+        ctx.strokeRect((c.x0 + ox + A4W / 2) * ppm, (c.y0 + oy + A4H / 2) * ppm, (c.x1 - c.x0) * ppm, (c.y1 - c.y0) * ppm);
         ctx.restore();
       }
       const m = margin() * ppm;
@@ -583,7 +629,7 @@ function draw() {
 
 function fitCanvas() {
   const st = $('stage'), rw = $('rotWrap'), dual = $('cDual').checked, gap = 14;
-  const availW = st.clientWidth - 24, availH = st.clientHeight - rw.offsetHeight - 24 - 10;
+  const availW = st.clientWidth - 24, availH = st.clientHeight - rw.offsetHeight - $('tools').offsetHeight - 24 - 20;
   const perW = dual ? (availW - gap) / 2 : availW;
   const w = Math.max(80, Math.min(perW, availH * A4W / A4H)), h = w * A4H / A4W;
   const dpr = window.devicePixelRatio || 1;
@@ -597,7 +643,7 @@ function fitCanvas() {
 
 function drawThumb(p) {
   if (!p || !p.thumb) return;
-  renderPage(p.thumb.getContext('2d'), p, p.thumb.width / A4W, p.prev);
+  renderPage(p.thumb.getContext('2d'), p, p.thumb.width / A4W);
 }
 let thumbTimer = 0;
 function drawAllThumbs() { clearTimeout(thumbTimer); thumbTimer = setTimeout(() => pages.forEach(drawThumb), 120); }
@@ -612,7 +658,16 @@ function rebuildThumbs() {
     const s = document.createElement('span'); s.textContent = i + 1;
     const x = document.createElement('button'); x.className = 'tdel'; x.textContent = '✕'; x.title = 'Diese Seite entfernen';
     x.onclick = e => { e.stopPropagation(); removePages([p]); };
-    d.append(c, s, x);
+    const a = document.createElement('button'); a.className = 'tadd'; a.textContent = '+'; a.title = 'Leere Seite davor einfügen';
+    a.onclick = e => {
+      e.stopPropagation();
+      const at = pages.indexOf(p);
+      pages.splice(at, 0, blankPage());
+      selectOnly(at);   // die neue leere Seite ist aktiv, z. B. zum Einfügen
+      rebuildThumbs(); syncUI(); draw();
+      setStatus(`Leere Seite vor Seite ${at + 2} eingefügt.`);
+    };
+    d.append(c, s, a, x);
     d.onclick = e => clickPage(pages.indexOf(p), e, false);
     // Drag and Drop zum Umsortieren
     d.draggable = true;
@@ -657,6 +712,7 @@ function movePages(lead, target, after) {
 // Seiten entfernen; die Auswahl springt auf die Seite an der Stelle der ersten entfernten
 function removePages(list) {
   if (!list.length) return;
+  if (clip && list.includes(clip.origin)) { setStatus('Diese Seite enthält den ausgeschnittenen Bereich. Erst «Einfügen» oder «Abbrechen».'); return; }
   const del = new Set(list), first = pages.findIndex(p => del.has(p));
   for (let i = pages.length - 1; i >= 0; i--) if (del.has(pages[i])) pages.splice(i, 1);
   selectOnly(Math.max(0, Math.min(first, pages.length - 1)));
@@ -676,7 +732,7 @@ function markSel() {
 function syncUI() {
   const p = pages[cur];
   $('empty').style.display = pages.length ? 'none' : 'flex';
-  $('bExport').disabled = !pages.length;
+  updateTools();
   const sv = p ? -p.rot : 0;
   $('rot').value = sv;
   $('rotVal').textContent = (Math.abs(sv) < 0.005 ? 0 : sv).toFixed(2).replace('.', ',') + '°';
@@ -742,6 +798,21 @@ views.forEach((v, vi) => {
   const cv = v.cv;
   cv.addEventListener('pointerdown', e => {
     const idx = viewIdxs()[vi], p = pages[idx]; if (!p) return;
+    if (mode) {   // Teilen / Ausschneiden / Einfügen wirken nur auf der aktiven Seite
+      if (idx !== cur) return;
+      const [X, Y] = toMm(e, cv);
+      if (mode === 'place') {   // nur Ziehen auf dem Stück verschiebt es, daneben passiert nichts
+        const { piece, host } = placing, c = piece.clip, ox = piece.ox + host.dx, oy = piece.oy + host.dy;
+        if (X < c.x0 + ox || X > c.x1 + ox || Y < c.y0 + oy || Y > c.y1 + oy) return;
+        drag = { mode: 'piece', x: e.clientX, y: e.clientY, cv }; cv.classList.add('drag');
+      } else if (mode === 'split') {
+        splitY = clampY(Y); drag = { mode: 'split', cv }; draw();
+      } else {
+        rubber = { v: vi, p, X0: X, Y0: Y, X1: X, Y1: Y, cut: true };
+      }
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
     const plain = clickPage(idx, e, true);   // wählt die angeklickte Seite aus
     if (!plain) return;
     cv.setPointerCapture(e.pointerId);
@@ -751,11 +822,17 @@ views.forEach((v, vi) => {
   cv.addEventListener('pointermove', e => {
     if (rubber && rubber.v === vi) { [rubber.X1, rubber.Y1] = toMm(e, cv); draw(); return; }
     if (!drag || drag.cv !== cv) return;
-    const mm = cv.clientWidth / A4W;
-    shift((e.clientX - drag.x) / mm, (e.clientY - drag.y) / mm);
+    if (drag.mode === 'split') { splitY = clampY(toMm(e, cv)[1]); draw(); return; }
+    const mm = cv.clientWidth / A4W, ddx = (e.clientX - drag.x) / mm, ddy = (e.clientY - drag.y) / mm;
     drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.mode === 'piece') { placing.piece.ox += ddx; placing.piece.oy += ddy; draw(); return; }
+    shift(ddx, ddy);
   });
-  const end = () => { if (rubber && rubber.v === vi) finishRect(); if (drag && drag.cv === cv) drag = null; cv.classList.remove('drag'); };
+  const end = () => {
+    if (rubber && rubber.v === vi) { if (rubber.cut) finishCut(); else finishRect(); }
+    if (drag && drag.cv === cv) drag = null;
+    cv.classList.remove('drag');
+  };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
 });
 
@@ -764,31 +841,114 @@ function finishRect() {
   const x0 = Math.min(r.X0, r.X1), x1 = Math.max(r.X0, r.X1), y0 = Math.min(r.Y0, r.Y1), y1 = Math.max(r.Y0, r.Y1);
   if (x1 - x0 < 1.5 && y1 - y0 < 1.5) {          // nur geklickt: Rechteck darunter auswählen
     const [u, v] = mmToUV(p, r.X1, r.Y1);
-    selRect = null; p.rects.forEach(q => { if (inPoly(q, u, v)) selRect = q; });
+    selRect = null; rectLayers(p).forEach(l => { if (inPoly(l.poly, u, v)) selRect = l; });
   } else {
-    selRect = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([X, Y]) => mmToUV(p, X, Y));
-    p.rects.push(selRect);
+    selRect = rectFromMm(p, x0, y0, x1, y1);
+    p.layers.push(selRect);
   }
   draw(); drawAllThumbs();
 }
 function delRect() {   // ausgewähltes Rechteck, sonst das zuletzt gezogene (aktive Seite)
-  const p = pages[cur]; if (!p || !p.rects.length) return;
-  const i = p.rects.indexOf(selRect);
-  p.rects.splice(i >= 0 ? i : p.rects.length - 1, 1); selRect = null;
+  const p = pages[cur]; if (!p) return;
+  const rl = rectLayers(p); if (!rl.length) return;
+  const l = rl.includes(selRect) ? selRect : rl[rl.length - 1];
+  p.layers.splice(p.layers.indexOf(l), 1); selRect = null;
   draw(); drawAllThumbs();
 }
+
+/* ---------- Werkzeugleiste: Teilen, Ausschneiden, Einfügen ---------- */
+const clampY = Y => Math.max(-A4H / 2, Math.min(A4H / 2, Y));
+function clonePage(p, name) {
+  return { ...p, name, thumb: null, thumbEl: null, layers: p.layers.map(cloneLayer) };
+}
+// Eingefrorene Kopie einer Seite als Quelle für ein ausgeschnittenes Stück (inkl. globaler Werte)
+function snapshotOf(p) {
+  return { src: p.src, prev: p.prev, rot: p.rot, q: p.q, dx: p.dx, dy: p.dy, k: p.k, aspect: p.aspect,
+           layers: p.layers.map(cloneLayer), G: { ...(p.G || G) } };
+}
+
+function updateTools() {
+  const has = !!pages[cur], free = has && !mode && !clip;
+  $('tSplitPrep').disabled = !free;
+  $('tSplitDo').disabled = mode !== 'split';
+  $('tCut').disabled = !free;
+  $('tPaste').disabled = !(has && !mode && clip);
+  $('tPasteDone').disabled = mode !== 'place';
+  $('tCancel').disabled = !(mode || clip);
+  // Während Teilen, Ausschneiden-Ziehen und Platzieren ist alles andere gesperrt
+  const locked = !!mode;
+  $('left').inert = locked; $('right').inert = locked; $('rotWrap').inert = locked;
+  $('bExport').disabled = !pages.length || !!clip;
+  const cursor = { split: 'ns-resize', cut: 'crosshair', place: 'move' }[mode] || (rectMode ? 'crosshair' : '');
+  views.forEach(v => { v.cv.style.cursor = cursor; });
+}
+const toolsDone = msg => { if (msg) setStatus(msg); syncUI(); draw(); drawAllThumbs(); };
+
+$('tSplitPrep').onclick = () => {
+  if (!pages[cur]) return;
+  mode = 'split'; splitY = 0; rectMode && $('bRectMode').click();
+  toolsDone('Strich auf die gewünschte Höhe ziehen, dann «Teilen ausführen».');
+};
+$('tSplitDo').onclick = () => {
+  const S = pages[cur]; if (mode !== 'split' || !S) return;
+  const D = clonePage(S, S.name + ' (Teil 2)');
+  S.layers.push(rectFromMm(S, -A4W, splitY, A4W, A4H));    // erste Seite: unterhalb weiss
+  D.layers.push(rectFromMm(D, -A4W, -A4H, A4W, splitY));   // zweite Seite: oberhalb weiss
+  pages.splice(cur + 1, 0, D);
+  mode = null;
+  rebuildThumbs();
+  toolsDone(`Seite ${cur + 1} geteilt.`);
+};
+$('tCut').onclick = () => {
+  if (!pages[cur] || clip) return;
+  mode = 'cut'; rectMode && $('bRectMode').click();
+  toolsDone('Bereich auf der aktiven Seite aufziehen.');
+};
+function finishCut() {
+  const r = rubber, S = r.p; rubber = null;
+  const x0 = Math.min(r.X0, r.X1), x1 = Math.max(r.X0, r.X1), y0 = Math.min(r.Y0, r.Y1), y1 = Math.max(r.Y0, r.Y1);
+  if (x1 - x0 < 2 || y1 - y0 < 2) { draw(); return; }   // zu klein: weiter im Ausschneiden-Modus
+  const snap = snapshotOf(S);                           // vor dem Weissmachen einfrieren
+  const cover = rectFromMm(S, x0, y0, x1, y1);
+  S.layers.push(cover);
+  clip = { snap, clip: { x0, y0, x1, y1 }, origin: S, cover };
+  mode = null;
+  toolsDone('Ausgeschnitten. Zielseite wählen und «Einfügen» klicken, oder «Abbrechen».');
+}
+$('tPaste').onclick = () => {
+  const host = pages[cur]; if (!host || !clip || mode) return;
+  // erscheint an derselben Stelle wie auf der Ursprungsseite
+  const piece = { t: 'piece', snap: clip.snap, clip: clip.clip, ox: -host.dx, oy: -host.dy };
+  host.layers.push(piece);
+  placing = { host, piece }; mode = 'place';
+  toolsDone('Stück an die richtige Stelle ziehen, dann «Einfügen abschliessen».');
+};
+$('tPasteDone').onclick = () => {
+  if (mode !== 'place') return;
+  mode = null; placing = null; clip = null;
+  toolsDone('Eingefügt.');
+};
+$('tCancel').onclick = () => {
+  if (mode === 'place') { const L = placing.host.layers, i = L.indexOf(placing.piece); if (i >= 0) L.splice(i, 1); placing = null; }
+  if (clip && (mode === 'place' || !mode)) {   // Stück zurück auf die Ursprungsseite
+    const L = clip.origin.layers, i = L.indexOf(clip.cover); if (i >= 0) L.splice(i, 1);
+    clip = null;
+  }
+  mode = null; rubber = null;
+  toolsDone('Abgebrochen.');
+};
 $('bRectMode').onclick = () => {
   rectMode = !rectMode;
   $('bRectMode').textContent = rectMode ? 'Rechtecke ziehen: EIN' : 'Rechtecke ziehen: aus';
   $('bRectMode').classList.toggle('primary', rectMode);
-  views.forEach(v => { v.cv.style.cursor = rectMode ? 'crosshair' : ''; });
+  updateTools();
   draw();
 };
 $('bRectDel').onclick = delRect;
-$('bRectClear').onclick = () => { const p = pages[cur]; if (p) { p.rects.length = 0; selRect = null; draw(); drawAllThumbs(); } };
+$('bRectClear').onclick = () => { const p = pages[cur]; if (p) { p.layers = p.layers.filter(l => l.t !== 'rect'); selRect = null; draw(); drawAllThumbs(); } };
 
 document.addEventListener('keydown', e => {
-  if (busy) return;
+  if (busy || mode) return;
   if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox' && document.activeElement.type !== 'range') return;
   if (rectMode && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); delRect(); return; }
   const st = e.shiftKey ? 1 : 0.2;
@@ -818,7 +978,7 @@ $('bDel').onclick = () => { if (cur >= 0) removePages(targetsFor('sel')); };
 function blankPage() {
   const c = document.createElement('canvas'); c.width = 420; c.height = 594;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, rects: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
+  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
 }
 $('bBlank').onclick = () => {
   const i = Math.max(cur, 0);
@@ -832,7 +992,7 @@ $('bDup').onclick = () => {
   const copies = [];
   for (let i = pages.length - 1; i >= 0; i--) {
     const p = pages[i]; if (!src.includes(p)) continue;
-    const d = { ...p, name: p.name + ' (Kopie)', thumb: null, thumbEl: null, rects: p.rects.map(r => r.map(pt => [...pt])) };
+    const d = clonePage(p, p.name + ' (Kopie)');
     pages.splice(i + 1, 0, d); copies.unshift(d);
   }
   selSet = new Set(copies); cur = pages.indexOf(copies[0]); anchor = cur; selRect = null;
@@ -855,6 +1015,7 @@ $('eMode').onchange = () => { const s = $('eMode').value === 'small'; $('eSmall'
 // Originalquelle in voller Auflösung laden (Bild oder gerenderte PDF-Seite)
 async function loadSource(p, cache) {
   const s = p.src;
+  if (s.kind === 'blank') return p.prev;
   if (s.kind === 'img') return await createImageBitmap(new Blob([s.bytes]));
   let doc = cache.get(s.bytes);
   if (!doc) { doc = await pdfjsLib.getDocument({ data: s.bytes.slice(0) }).promise; cache.set(s.bytes, doc); }
@@ -882,14 +1043,26 @@ $('bExport').onclick = async () => {
       const p = pages[i];
       setProgress(i / n); setStatus(`Seite ${i + 1}/${n}`);
       await new Promise(r => setTimeout(r, 10));
-      if (p.src.kind === 'blank') { doc.addPage([595.28, 841.89]); continue; }
-      const img = await loadSource(p, cache);
-      const { fx, fy } = factors(p);
-      let ppm = mode === 'small' ? dpi / 25.4 : Math.max(img.width / fx, img.height / fy); // Pixel pro mm
+      if (p.src.kind === 'blank' && !p.layers.some(l => l.t === 'piece')) { doc.addPage([595.28, 841.89]); continue; }
+      // Originale der Seite und aller eingefügten Stücke laden (rekursiv)
+      const imgs = new Map();
+      const preload = async q => {
+        if (!imgs.has(q.src)) imgs.set(q.src, await loadSource(q, cache));
+        for (const l of q.layers) if (l.t === 'piece') await preload(l.snap);
+      };
+      await preload(p);
+      // Auflösung: die feinste der beteiligten Scans (Pixel pro mm)
+      const finest = q => {
+        let m = 0;
+        if (q.src.kind !== 'blank') { const im = imgs.get(q.src), { fx, fy } = factors(q); m = Math.max(im.width / fx, im.height / fy); }
+        for (const l of q.layers) if (l.t === 'piece') m = Math.max(m, finest(l.snap));
+        return m;
+      };
+      let ppm = mode === 'small' ? dpi / 25.4 : (finest(p) || 300 / 25.4);
       ppm = Math.min(ppm, 33); // ca. 840 dpi als Obergrenze
       const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
-      renderPage(c.getContext('2d'), p, c.width / A4W, img);
-      img.close && img.close();
+      renderPage(c.getContext('2d'), p, c.width / A4W, q => imgs.get(q.src) || q.prev);
+      imgs.forEach(im => im.close && im.close());
       const png = mode === 'png';
       const blob = await new Promise(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', mode === 'jpg' ? 0.95 : qSmall));
       c.width = c.height = 1;
