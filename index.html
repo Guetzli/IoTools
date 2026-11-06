@@ -35,6 +35,9 @@ button:disabled{opacity:.4;cursor:default}
 .thumb .tdel:hover{background:rgba(200,40,40,.95);border:none}
 .thumb .tadd{position:absolute;left:4px;top:2px;font-size:11px;line-height:1.2;padding:0 5px;border:none;border-radius:3px;background:rgba(0,0,0,.55);color:#fff}
 .thumb .tadd:hover{background:var(--acc);border:none}
+.tspacer{display:flex;align-items:center;justify-content:center;aspect-ratio:210/297}
+.tspacer button{font-size:18px;padding:6px 14px}
+.tspacer button:hover:not(:disabled){border-color:rgba(200,40,40,.95);color:rgba(200,40,40,.95)}
 #tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .thumb.dragging{opacity:.4}
 .thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
@@ -644,7 +647,13 @@ function drawAllThumbs() { clearTimeout(thumbTimer); thumbTimer = setTimeout(() 
 
 function rebuildThumbs() {
   const box = $('thumbs'); box.innerHTML = '';
-  box.append(document.createElement('div'));   // links oben bleibt frei: Seite 1 steht rechts
+  // Links oben (Platz von «Seite 0», Seite 1 steht rechts): markierte Seiten auf einmal entfernen
+  const sp = document.createElement('div'); sp.className = 'tspacer';
+  const del = document.createElement('button'); del.textContent = '✕'; del.disabled = !pages.length;
+  del.title = 'Alle markierten Seiten entfernen (Strg/Cmd- oder Shift-Klick markiert mehrere)';
+  del.onclick = () => { if (cur >= 0) removePages(targetsFor('sel')); };
+  sp.append(del);
+  box.append(sp);
   pages.forEach((p, i) => {
     const d = document.createElement('div'); d.className = 'thumb';
     const c = document.createElement('canvas'); c.width = 210 * 0.7; c.height = 297 * 0.7;
