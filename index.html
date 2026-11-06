@@ -280,24 +280,27 @@ async function analyzeInWorker(c) {
   const bmp = await createImageBitmap(c);
   return new Promise(res => { P.wait.set(id, res); wk.postMessage({ id, bmp, w, h }, [bmp]); });
 }
-// Grösste Bildbreite im PDF aus den Bild-Wörterbüchern (unkomprimierter Text, Bilder sind nie in Objektströmen).
-// Viel schneller als pdf.js-Operatorlisten, die jedes Bild dekodieren. Gilt für alle Seiten der Datei.
-function pdfMaxImageWidth(bytes) {
+// Bild-Wörterbücher im PDF lesen (unkomprimierter Text, Bilder sind nie in Objektströmen); gilt für die ganze Datei.
+// Viel schneller als pdf.js-Operatorlisten, die jedes Bild dekodieren.
+// maxW = grösste Bildbreite (Scan-Auflösung), bilevel = alle Bilder schwarz-weiss (1 Bit pro Pixel, z. B. CCITT/JBIG2)
+function pdfImageInfo(bytes) {
   const s = new TextDecoder('latin1').decode(bytes), re = /\/Subtype\s*\/Image/g;
-  let m, best = 0;
+  let m, maxW = 0, n = 0, bw = 0;
   while ((m = re.exec(s))) {
     const a = s.lastIndexOf('obj', m.index), b = s.indexOf('stream', m.index);
     const dict = s.slice(a < 0 ? Math.max(0, m.index - 2000) : a, b < 0 ? m.index + 2000 : b);
     const w = /\/Width\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
-    if (w) best = Math.max(best, +w[1]);
+    if (w) maxW = Math.max(maxW, +w[1]);
+    n++;
+    if (/\/BitsPerComponent\s+1\b/.test(dict) || /\/ImageMask\s+true/.test(dict)) bw++;
   }
-  return best;
+  return { maxW, bilevel: n > 0 && bw === n };
 }
 async function addPdf(f) {
   if (!window.pdfjsLib) throw new Error('pdf.js konnte nicht geladen werden (Internet?)');
   const bytes = await f.arrayBuffer();
   const open = () => pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;   // eigener Worker pro Dokument
-  const first = await open(), n = first.numPages, pxW = pdfMaxImageWidth(bytes);
+  const first = await open(), n = first.numPages, { maxW: pxW, bilevel } = pdfImageInfo(bytes);
   const k = Math.max(1, Math.min(n, 8, (navigator.hardwareConcurrency || 2) - 1));
   const docs = [first, ...await Promise.all(Array.from({ length: k - 1 }, open))];
   const done = Array.from({ length: n }, deferred);
@@ -325,7 +328,7 @@ async function addPdf(f) {
   try {
     for (let i = 0; i < n; i++) {   // Seiten in ihrer Reihenfolge übernehmen
       const { c, an } = await done[i].pr;
-      makePage(c, `${f.name} S.${i + 1}`, { kind: 'pdf', bytes, index: i, pxW }, an);
+      makePage(c, `${f.name} S.${i + 1}`, { kind: 'pdf', bytes, index: i, pxW, bilevel }, an);
     }
   } finally {
     await pool.catch(() => {});
@@ -1285,6 +1288,12 @@ function losslessSrc(s) {
 function pageLossless(q) {
   return (q.src.kind === 'blank' || losslessSrc(q.src)) && q.layers.every(l => l.t !== 'piece' || pageLossless(l.snap));
 }
+// «Wie Quelle»: schwarz-weiss, wenn alle beteiligten Scans schwarz-weiss sind (leere Seiten zählen nicht)
+function pageBilevel(q) {
+  const all = r => (r.src.kind === 'blank' || (r.src.kind === 'pdf' && r.src.bilevel)) && r.layers.every(l => l.t !== 'piece' || all(l.snap));
+  const any = r => r.src.kind !== 'blank' || r.layers.some(l => l.t === 'piece' && any(l.snap));
+  return all(q) && any(q);
+}
 async function loadSource(p, cache) {
   const s = p.src;
   if (s.kind === 'blank') return p.prev;
@@ -1309,22 +1318,31 @@ function makeRenderWorker() {
   const src = [`const A4W = ${A4W}, A4H = ${A4H}, MARGIN0 = ${MARGIN0}`, 'const rad = ' + rad, 'const margin = ' + margin,
     setPageTransform, renderPage, renderContent].map(String).join(';') + `;
 onmessage = async e => {
-  const { id, page, bmps, ppm, type, quality } = e.data;
+  const { id, page, bmps, ppm, type, quality, bilevel } = e.data;
   try {
     const W = Math.round(A4W * ppm), H = Math.round(A4H * ppm), oc = new OffscreenCanvas(W, H);
-    renderPage(oc.getContext('2d'), page, W / A4W, q => bmps[q.img]);
+    const ctx = oc.getContext('2d', { willReadFrequently: bilevel });
+    renderPage(ctx, page, W / A4W, q => bmps[q.img]);
     bmps.forEach(b => b.close());
-    const buf = await (await oc.convertToBlob({ type, quality })).arrayBuffer();
-    postMessage({ id, buf }, [buf]);
+    let buf;
+    if (bilevel) {   // 1 Bit pro Pixel (1 = weiss), Schwelle mittleres Grau, Zeilen auf Bytes aufgefüllt, zlib/Flate
+      const d = ctx.getImageData(0, 0, W, H).data, rb = (W + 7) >> 3, out = new Uint8Array(rb * H);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = 4 * (y * W + x);
+        if (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114 >= 128000) out[y * rb + (x >> 3)] |= 128 >> (x & 7);
+      }
+      buf = await new Response(new Blob([out]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer();
+    } else buf = await (await oc.convertToBlob({ type, quality })).arrayBuffer();
+    postMessage({ id, buf, W, H }, [buf]);
   } catch (err) { postMessage({ id, err: String(err) }); }
 };`;
   const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
   w.wait = new Map(); w.id = 0;
-  w.onmessage = e => { const f = w.wait.get(e.data.id); w.wait.delete(e.data.id); e.data.err ? f.rej(new Error(e.data.err)) : f.res(new Uint8Array(e.data.buf)); };
+  w.onmessage = e => { const f = w.wait.get(e.data.id); w.wait.delete(e.data.id); e.data.err ? f.rej(new Error(e.data.err)) : f.res({ bytes: new Uint8Array(e.data.buf), w: e.data.W, h: e.data.H }); };
   w.onerror = e => { e.preventDefault(); w.wait.forEach(f => f.rej(new Error('Export-Worker: ' + (e.message || 'Fehler')))); w.wait.clear(); w.broken = true; };
   return w;
 }
-async function renderInWorker(w, p, imgs, ppm, type, quality) {
+async function renderInWorker(w, p, imgs, ppm, type, quality, bilevel) {
   const srcs = [...imgs.keys()];
   const slim = q => ({ img: srcs.indexOf(q.src), rot: q.rot, q: q.q, dx: q.dx, dy: q.dy, k: q.k, sy: q.sy || 0, m: q.m,
     layers: q.layers.map(l => l.t === 'rect' ? { t: 'rect', poly: l.poly } : { t: 'piece', clip: l.clip, ox: l.ox, oy: l.oy, snap: slim(l.snap) }) });
@@ -1332,7 +1350,7 @@ async function renderInWorker(w, p, imgs, ppm, type, quality) {
   srcs.forEach(k => { if (k.kind === 'pdf') { const im = imgs.get(k); im.width = im.height = 1; } });   // grosse PDF-Renderings sofort freigeben
   if (w.broken) throw new Error('Export-Worker nicht verfügbar');
   const id = ++w.id;
-  return new Promise((res, rej) => { w.wait.set(id, { res, rej }); w.postMessage({ id, page: slim(p), bmps, ppm, type, quality }, bmps); });
+  return new Promise((res, rej) => { w.wait.set(id, { res, rej }); w.postMessage({ id, page: slim(p), bmps, ppm, type, quality, bilevel }, bmps); });
 }
 async function exportPage(p, cache, mode, dpi, qSmall, wk) {
   if (p.src.kind === 'blank' && !p.layers.some(l => l.t === 'piece')) return null;
@@ -1354,7 +1372,8 @@ async function exportPage(p, cache, mode, dpi, qSmall, wk) {
   ppm = Math.min(ppm, 33); // ca. 840 dpi als Obergrenze
   const png = mode === 'png' || (mode === 'auto' && pageLossless(p));
   const type = png ? 'image/png' : 'image/jpeg', quality = mode === 'small' ? qSmall : 0.95;
-  if (wk) return { png, bytes: await renderInWorker(wk, p, imgs, ppm, type, quality) };
+  const bilevel = mode === 'auto' && pageBilevel(p);   // Schwarz-Weiss-Quelle bleibt schwarz-weiss (nur mit Worker)
+  if (wk) return { png, bilevel, ...await renderInWorker(wk, p, imgs, ppm, type, quality, bilevel) };
   const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
   renderPage(c.getContext('2d'), p, c.width / A4W, q => imgs.get(q.src) || q.prev);
   imgs.forEach(im => im.close && im.close());
@@ -1384,7 +1403,12 @@ $('bExport').onclick = async () => {
     const doc = await PDFLib.PDFDocument.create();
     for (let i = 0; i < n; i++) {
       const r = await done[i].pr, pg = doc.addPage([595.28, 841.89]);
-      if (r) pg.drawImage(r.png ? await doc.embedPng(r.bytes) : await doc.embedJpg(r.bytes), { x: 0, y: 0, width: 595.28, height: 841.89 });
+      if (r && r.bilevel) {   // 1-Bit-Bild direkt als Bild-Objekt (Flate), über die ganze Seite
+        const ref = doc.context.register(doc.context.stream(r.bytes, { Type: 'XObject', Subtype: 'Image', Width: r.w, Height: r.h,
+          ColorSpace: 'DeviceGray', BitsPerComponent: 1, Filter: 'FlateDecode' }));
+        const L = PDFLib, name = pg.node.newXObject('Im', ref);
+        pg.pushOperators(L.pushGraphicsState(), L.concatTransformationMatrix(595.28, 0, 0, 841.89, 0, 0), L.drawObject(name), L.popGraphicsState());
+      } else if (r) pg.drawImage(r.png ? await doc.embedPng(r.bytes) : await doc.embedJpg(r.bytes), { x: 0, y: 0, width: 595.28, height: 841.89 });
       const el = performance.now() - t0, rest = el / (i + 1) * (n - i - 1);
       setProgress((i + 1) / n); setStatus(`Seite ${i + 1}/${n}` + (el > 1500 && rest > 500 ? ` · noch ca. ${fmtDur(rest)}` : ''));
     }
