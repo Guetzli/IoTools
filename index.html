@@ -68,12 +68,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
 <div id="main">
   <aside id="left">
     <h3>Seiten</h3>
-    <div class="row btns">
-      <button id="bLeft" title="Seite nach vorn">◀</button>
-      <button id="bRight" title="Seite nach hinten">▶</button>
-      <button id="bDel" title="Markierte Seiten entfernen">✕</button>
-    </div>
-    <p class="hint">Klick wählt eine Seite, Shift einen Bereich, Strg/Cmd einzelne Seiten dazu. Miniaturen per Drag and Drop verschieben, ✕ an einer Miniatur entfernt genau diese Seite.</p>
     <div id="thumbs"></div>
   </aside>
 
@@ -143,7 +137,7 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <p class="hint">Der rot gestrichelte Rahmen zeigt den Rand. Alles ausserhalb wird weiss und auch im Export entfernt. Inhalt mit der Maus ziehen. Pfeiltasten verschieben um 0,2 mm (mit Shift 1 mm). Der Regler unter den Seiten dreht um ±3° (bei mehreren Seiten werden alle gleich weitergedreht).</p>
 
     <h3>Seiten einfügen</h3>
-    <div class="row btns"><button id="bBlank">Leere Seite davor</button><button id="bDup">Duplizieren</button></div>
+    <div class="row btns"><button id="bDup">Duplizieren</button></div>
 
     <h3>Weisse Rechtecke</h3>
     <div class="row btns"><button id="bRectMode">Rechtecke ziehen: aus</button></div>
@@ -971,22 +965,11 @@ $('pK').addEventListener('input', e => {
 });
 
 /* ---------- Seiten verwalten ---------- */
-$('bLeft').onclick = () => { if (cur > 0) { [pages[cur - 1], pages[cur]] = [pages[cur], pages[cur - 1]]; cur--; rebuildThumbs(); syncUI(); draw(); } };
-$('bRight').onclick = () => { if (cur >= 0 && cur < pages.length - 1) { [pages[cur + 1], pages[cur]] = [pages[cur], pages[cur + 1]]; cur++; rebuildThumbs(); syncUI(); draw(); } };
-$('bDel').onclick = () => { if (cur >= 0) removePages(targetsFor('sel')); };
-
 function blankPage() {
   const c = document.createElement('canvas'); c.width = 420; c.height = 594;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
   return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
 }
-$('bBlank').onclick = () => {
-  const i = Math.max(cur, 0);
-  pages.splice(i, 0, blankPage());
-  cur = pages.length === 1 ? 0 : i + 1;           // markierte Seite bleibt markiert
-  ensureSel(); rebuildThumbs(); syncUI(); draw();
-  setStatus(`Leere Seite vor Seite ${i + 1} eingefügt.`);
-};
 $('bDup').onclick = () => {
   const src = targetsFor('sel'); if (!src.length) return;
   const copies = [];
