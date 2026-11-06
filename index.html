@@ -11,11 +11,11 @@
 [hidden]{display:none!important}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif}
-#main{display:grid;grid-template-columns:250px 1fr 200px;height:100vh}
+#main{display:grid;grid-template-columns:250px 1fr 180px;height:100vh}
 aside{background:var(--panel);overflow:auto;padding:10px}
 #left{border-right:1px solid var(--line)}
 #right{border-left:1px solid var(--line)}
-h3{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+h3{margin:26px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 h3:first-child{margin-top:0}
 button,select,input[type=number]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 9px}
 button{cursor:pointer}
@@ -44,8 +44,8 @@ button:disabled{opacity:.4;cursor:default}
 .tspacer button{font-size:18px;padding:6px 14px}
 .tspacer button:hover:not(:disabled){border-color:rgba(200,40,40,.95);color:rgba(200,40,40,.95)}
 .split{position:relative;display:flex;margin:5px 0}
-.split .main{flex:1;border-radius:6px 0 0 6px}
-.split .more{border-radius:0 6px 6px 0;margin-left:-1px;padding:5px 11px}
+.split .main{flex:1;border-radius:6px 0 0 6px;white-space:nowrap;padding:5px 4px}
+.split .more{border-radius:0 6px 6px 0;margin-left:-1px;padding:5px 8px}
 .split .more.primary{border-left:1px solid rgba(255,255,255,.45)}
 .menu{position:absolute;top:100%;left:0;right:0;z-index:20;margin-top:4px;padding:4px;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .menu[hidden]{display:none}
@@ -150,7 +150,7 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
       <button data-g="all" role="radio" class="on" aria-checked="true">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="even" role="radio">Gerade</button><button data-g="odd" role="radio">Ungerade</button>
     </div>
     <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" min="10" value="100"></div>
-    <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
+    <div class="row"><label>Höhe (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
     <div class="row"><label>Rand (mm)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
     <div class="row btns rotq">
       <button data-dq="-90" title="90° gegen den Uhrzeigersinn drehen" aria-label="90° gegen den Uhrzeigersinn drehen"><svg viewBox="-1 -1 26 26"><circle class="guide" cx="12" cy="12" r="8"/><path d="M12 4A8 8 0 0 0 4 12"/><path d="M1.3 9.3L4 12.6L6.7 9.3"/></svg></button>
@@ -177,8 +177,8 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
 
 
     <h3>Export</h3>
-    <div class="row"><label>Modus</label>
-      <select id="eMode">
+    <div class="row">
+      <select id="eMode" aria-label="Exportmodus">
         <option value="auto" title="Volle Auflösung; PNG bei PNG-, BMP- und GIF-Bildern, sonst JPEG 95 %">Wie Quelle</option>
         <option value="png" title="Volle Auflösung, immer PNG">Verlustfrei (PNG)</option>
         <option value="small">Verkleinert</option>
