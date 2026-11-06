@@ -68,6 +68,7 @@ input::placeholder{color:var(--muted);font-style:italic}
 #views{display:flex;gap:14px;align-items:flex-start;justify-content:center}
 .pv{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.35);cursor:grab;touch-action:none}
 .pv.drag{cursor:grabbing}
+.pv.blocked{cursor:not-allowed}
 .pv.empty{background:transparent;box-shadow:none;outline:2px dashed var(--line);cursor:default}
 .pv.sel{outline:2px solid var(--acc);outline-offset:2px}
 .pv.cur{outline:4px solid var(--acc);outline-offset:2px}
@@ -694,6 +695,7 @@ function draw() {
       cv.classList.toggle('empty', !p);
       cv.classList.toggle('cur', !!p && idx === cur);
       cv.classList.toggle('sel', !!p && idx !== cur && selSet.has(p));
+      cv.classList.toggle('blocked', !!p && !mode && !moveAllows(idx));
       if (!p) { ctx.clearRect(0, 0, cv.width, cv.height); return; }
       const ppm = cv.width / A4W;
       renderPage(ctx, p, ppm);
@@ -865,10 +867,10 @@ function markSel() {
 }
 
 function syncUI() {
-  const p = pages[cur];
   $('empty').style.display = pages.length ? 'none' : 'flex';
+  syncMove();
   updateTools();
-  const sv = p ? -p.rot : 0;
+  const sv = pages[cur] ? -pages[cur].rot : 0;
   $('rot').value = sv;
   $('rotVal').textContent = (Math.abs(sv) < 0.005 ? 0 : sv).toFixed(2).replace('.', ',') + '°';
   // Grösse / Höhe der gewählten Seitengruppe; verschiedene Werte: leeres Feld mit «gemischt»
@@ -913,7 +915,19 @@ $('rP').onclick = () => pages[cur] && setRot(pages[cur].rot - 0.05);
 $('rReset').onclick = () => { targetsFor('sel').forEach(t => { t.rot = 0; }); syncUI(); draw(); };
 
 // nach der Wahl Fokus weg, damit die Pfeiltasten wieder den Inhalt verschieben
-$('dSel').onchange = e => e.target.blur();
+$('dSel').onchange = e => { e.target.blur(); syncUI(); draw(); };
+// Seite 1, 3, 5 … hat Index 0, 2, 4 … und steht in der Doppelseite rechts
+const moveAllows = i => { const v = $('dSel').value; return v === 'odd' ? i % 2 === 0 : v === 'even' ? i % 2 === 1 : true; };
+// Ungerade/Gerade nur anbieten, wenn die Doppelseite eine solche Seite hat; dann ist diese die aktive
+function syncMove() {
+  const sel = $('dSel'), [l, r] = viewIdxs(), has = { odd: !!pages[r], even: !!pages[l] };
+  sel.querySelector('[value=odd]').disabled = !has.odd;
+  sel.querySelector('[value=even]').disabled = !has.even;
+  const v = sel.value;
+  if ((v === 'odd' || v === 'even') && !has[v]) sel.value = 'sel';
+  else if (v === 'odd' && cur !== r) selectOnly(r);
+  else if (v === 'even' && cur !== l) selectOnly(l);
+}
 function shift(ddx, ddy) {
   const sel = $('dSel').value;
   targetsFor(sel).forEach(p => { p.dx += ddx; p.dy += ddy; });
@@ -961,6 +975,7 @@ views.forEach((v, vi) => {
       cv.setPointerCapture(e.pointerId);
       return;
     }
+    if (!moveAllows(idx)) return;   // Verschieben auf Ungerade/Gerade: die andere Seite ist nicht wählbar
     const plain = clickPage(idx, e, true);   // wählt die angeklickte Seite aus
     if (!plain) return;
     cv.setPointerCapture(e.pointerId);
