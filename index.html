@@ -39,8 +39,9 @@ button:disabled{opacity:.4;cursor:default}
 .tspacer button{font-size:18px;padding:6px 14px}
 .tspacer button:hover:not(:disabled){border-color:rgba(200,40,40,.95);color:rgba(200,40,40,.95)}
 .split{position:relative;display:flex;margin:5px 0}
-.split #aAll{flex:1;border-radius:6px 0 0 6px}
-.split #aMore{border-radius:0 6px 6px 0;border-left:1px solid rgba(255,255,255,.45);padding:5px 11px}
+.split .main{flex:1;border-radius:6px 0 0 6px}
+.split .more{border-radius:0 6px 6px 0;margin-left:-1px;padding:5px 11px}
+.split .more.primary{border-left:1px solid rgba(255,255,255,.45)}
 .menu{position:absolute;top:100%;left:0;right:0;z-index:20;margin-top:4px;padding:4px;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .menu[hidden]{display:none}
 .menu button{border:none;background:transparent;text-align:left;padding:7px 10px}
@@ -115,11 +116,19 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
 
     <div class="split" id="aSplit">
-      <button id="aAll" class="primary">Alles automatisch</button><button id="aMore" class="primary" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
+      <button id="aAll" class="primary main">Automatisch drehen / Grösse / ausrichten</button><button id="aMore" class="primary more" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
       <div class="menu" id="aMenu" role="menu" hidden>
         <button id="aRot" role="menuitem">Gerade drehen</button>
         <button id="aScale" role="menuitem">Grösse</button>
         <button id="aAlign" role="menuitem">Ausrichten</button>
+      </div>
+    </div>
+    <div class="split" id="rSplit">
+      <button id="rAll" class="main" title="Drehung, 90°-Drehung, Verschiebung und Grösse pro Seite zurücksetzen">Alle Seiten zurücksetzen</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Andere Seiten zurücksetzen">▾</button>
+      <div class="menu" id="rMenu" role="menu" hidden>
+        <button data-reset="sel" role="menuitem">Markierte Seiten zurücksetzen</button>
+        <button data-reset="odd" role="menuitem">Ungerade Seiten zurücksetzen</button>
+        <button data-reset="even" role="menuitem">Gerade Seiten zurücksetzen</button>
       </div>
     </div>
     <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
@@ -135,8 +144,7 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <div class="row btns"><button data-q="0">0°</button><button data-q="90">90°</button><button data-q="180">180°</button><button data-q="270">270°</button></div>
     <div class="row"><label>Grösse (%)</label><input id="gGK" type="number" step="0.5" min="10" value="100"></div>
 
-    <h3>Markierte Seiten</h3>
-    <div class="row btns"><button id="bReset">Zurücksetzen</button></div>
+    <h3>Verschieben</h3>
     <div class="row"><label>Verschieben wirkt auf</label>
       <select id="dSel">
         <option value="sel">Markierte Seiten</option>
@@ -975,12 +983,27 @@ $('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet
 $('aRot').onclick = withBusy(() => autoRotate(pages));
 $('aScale').onclick = withBusy(() => autoScale());
 $('aAlign').onclick = withBusy(() => autoAlign(pages));
-// Split-Button: ▾ klappt die einzelnen Automatiken auf; Auswahl oder Klick daneben schliesst
-const setAutoMenu = open => { $('aMenu').hidden = !open; $('aMore').setAttribute('aria-expanded', open); };
-$('aMore').onclick = e => { e.stopPropagation(); setAutoMenu($('aMenu').hidden); };
-$('aMenu').addEventListener('click', () => setAutoMenu(false));
-document.addEventListener('click', e => { if (!$('aSplit').contains(e.target)) setAutoMenu(false); });
-$('bReset').onclick = () => { targetsFor('sel').forEach(p => { p.rot = 0; p.q = 0; p.dx = 0; p.dy = 0; p.k = 1; }); syncUI(); draw(); drawAllThumbs(); };
+// Split-Buttons: ▾ klappt das Menü auf (nur eines gleichzeitig); Auswahl oder Klick daneben schliesst
+const splitMenus = [];
+document.querySelectorAll('.split').forEach(root => {
+  const more = root.querySelector('.more'), menu = root.querySelector('.menu');
+  const set = open => { menu.hidden = !open; more.setAttribute('aria-expanded', open); };
+  splitMenus.push(set);
+  more.onclick = e => { e.stopPropagation(); const open = menu.hidden; splitMenus.forEach(s => s(false)); set(open); };
+  menu.addEventListener('click', () => set(false));
+  document.addEventListener('click', e => { if (!root.contains(e.target)) set(false); });
+});
+
+// Zurücksetzen: Feindrehung, 90°-Drehung, Verschiebung, Grösse pro Seite (Rechtecke und Stücke bleiben)
+const GROUP = { all: 'Alle Seiten', sel: 'Markierte Seiten', odd: 'Ungerade Seiten', even: 'Gerade Seiten' };
+function resetPages(sel) {
+  const t = targetsFor(sel); if (!t.length) return;
+  t.forEach(p => { p.rot = 0; p.q = 0; p.dx = 0; p.dy = 0; p.k = 1; });
+  syncUI(); draw(); drawAllThumbs();
+  setStatus(`${GROUP[sel]} zurückgesetzt (${t.length}).`);
+}
+$('rAll').onclick = () => resetPages('all');
+document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => resetPages(b.dataset.reset));
 
 /* ---------- Seiten verwalten ---------- */
 function blankPage() {
