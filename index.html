@@ -56,7 +56,9 @@ button:disabled{opacity:.4;cursor:default}
 .rotq .guide{stroke-opacity:.3;stroke-width:1.4;stroke-dasharray:1.6 2.2}
 input::placeholder{color:var(--muted);font-style:italic}
 .menu .sep{height:1px;background:var(--line);margin:4px 2px}
-#tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+#tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center}
+#tools button{font-size:13px;padding:4px 8px}
+.tsep{width:1px;align-self:stretch;margin:2px 4px;background:var(--line)}
 .thumb.dragging{opacity:.4}
 .thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
 .thumb[data-drop=before]::before{top:-6px}
@@ -95,12 +97,17 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
   <section id="stage">
     <div id="empty">Scans (PDF oder Bilder) hierher ziehen<br>oder rechts «Dateien öffnen» wählen.</div>
     <div id="tools">
+      <button id="tDup" title="Aktive Seite duplizieren; die Kopie kommt direkt dahinter">Duplizieren</button>
+      <i class="tsep"></i>
       <button id="tSplitPrep" title="Waagrechten Strich auf der aktiven Seite zeigen">Teilen vorbereiten</button>
       <button id="tSplitDo" title="Seite am Strich teilen">Teilen ausführen</button>
       <button id="tCut" title="Bereich auf der aktiven Seite aufziehen und ausschneiden">Ausschneiden</button>
       <button id="tPaste" title="Ausgeschnittenen Bereich auf der aktiven Seite einfügen">Einfügen</button>
       <button id="tPasteDone" title="Eingefügtes Stück fest auf der Seite platzieren">Einfügen abschliessen</button>
       <button id="tCancel" title="Teilen, Ausschneiden oder Einfügen abbrechen">Abbrechen</button>
+      <i class="tsep"></i>
+      <button id="tRect" aria-pressed="false" title="Ein: auf der Seite weisse Rechtecke aufziehen, die den Inhalt verdecken. Ein Klick wählt ein Rechteck (rot).">Rechteck ziehen</button>
+      <button id="tRectDel" title="Gewähltes Rechteck entfernen, sonst das zuletzt gezogene (auch mit Entf)">Rechteck löschen</button>
     </div>
     <div id="views">
       <canvas id="cvL" class="pv" width="10" height="10"></canvas>
@@ -159,14 +166,6 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
         <option value="all">Alle Seiten</option>
       </select></div>
     <p class="hint">Der rot gestrichelte Rahmen zeigt den Rand. Alles ausserhalb wird weiss und auch im Export entfernt. Inhalt mit der Maus ziehen. Pfeiltasten verschieben um 0,2 mm (mit Shift 1 mm). Der Regler unter den Seiten dreht um ±3° (bei mehreren Seiten werden alle gleich weitergedreht).</p>
-
-    <h3>Seiten einfügen</h3>
-    <div class="row btns"><button id="bDup">Duplizieren</button></div>
-
-    <h3>Weisse Rechtecke</h3>
-    <div class="row btns"><button id="bRectMode">Rechtecke ziehen: aus</button></div>
-    <div class="row btns"><button id="bRectDel">Rechteck löschen</button><button id="bRectClear">Alle löschen</button></div>
-    <p class="hint">Bei «ein» ziehst du auf einer Seite Rechtecke auf, die den Inhalt verdecken. Pro Seite sind beliebig viele möglich. Ein Klick wählt ein Rechteck (rot), Entf oder «Rechteck löschen» entfernt es, ohne Auswahl das zuletzt gezogene. Die Rechtecke wandern mit dem Seiteninhalt mit.</p>
 
     <h3>Export</h3>
     <div class="row"><label>Modus</label>
@@ -686,6 +685,7 @@ function viewIdxs() {
 
 let raf = 0;
 function draw() {
+  updateTools();
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(() => {
     const idxs = viewIdxs();
@@ -1021,6 +1021,9 @@ function updateTools() {
   $('tPaste').disabled = !(has && !mode && clip);
   $('tPasteDone').disabled = mode !== 'place';
   $('tCancel').disabled = !(mode || clip);
+  $('tDup').disabled = !free;
+  $('tRect').disabled = !has || !!mode;
+  $('tRectDel').disabled = !(has && rectMode && !mode && rectLayers(pages[cur]).length);
   // Während Teilen, Ausschneiden-Ziehen und Platzieren ist alles andere gesperrt
   const locked = !!mode;
   $('left').inert = locked; $('right').inert = locked; $('rotWrap').inert = locked;
@@ -1032,7 +1035,7 @@ const toolsDone = msg => { if (msg) setStatus(msg); syncUI(); draw(); drawAllThu
 
 $('tSplitPrep').onclick = () => {
   if (!pages[cur]) return;
-  mode = 'split'; splitY = 0; rectMode && $('bRectMode').click();
+  mode = 'split'; splitY = 0; rectMode && $('tRect').click();
   toolsDone('Strich auf die gewünschte Höhe ziehen, dann «Teilen ausführen».');
 };
 $('tSplitDo').onclick = () => {
@@ -1047,7 +1050,7 @@ $('tSplitDo').onclick = () => {
 };
 $('tCut').onclick = () => {
   if (!pages[cur] || clip) return;
-  mode = 'cut'; rectMode && $('bRectMode').click();
+  mode = 'cut'; rectMode && $('tRect').click();
   toolsDone('Bereich auf der aktiven Seite aufziehen.');
 };
 function finishCut() {
@@ -1083,15 +1086,14 @@ $('tCancel').onclick = () => {
   mode = null; rubber = null;
   toolsDone('Abgebrochen.');
 };
-$('bRectMode').onclick = () => {
-  rectMode = !rectMode;
-  $('bRectMode').textContent = rectMode ? 'Rechtecke ziehen: EIN' : 'Rechtecke ziehen: aus';
-  $('bRectMode').classList.toggle('primary', rectMode);
+$('tRect').onclick = () => {
+  rectMode = !rectMode; if (!rectMode) selRect = null;
+  $('tRect').classList.toggle('primary', rectMode);
+  $('tRect').setAttribute('aria-pressed', rectMode);
   updateTools();
   draw();
 };
-$('bRectDel').onclick = delRect;
-$('bRectClear').onclick = () => { const p = pages[cur]; if (p) { p.layers = p.layers.filter(l => l.t !== 'rect'); selRect = null; draw(); drawAllThumbs(); } };
+$('tRectDel').onclick = delRect;
 
 document.addEventListener('keydown', e => {
   if (busy || mode) return;
@@ -1158,17 +1160,13 @@ function blankPage() {
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
   return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, m: MARGIN0, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
 }
-$('bDup').onclick = () => {
-  const src = targetsFor('sel'); if (!src.length) return;
-  const copies = [];
-  for (let i = pages.length - 1; i >= 0; i--) {
-    const p = pages[i]; if (!src.includes(p)) continue;
-    const d = clonePage(p, p.name + ' (Kopie)');
-    pages.splice(i + 1, 0, d); copies.unshift(d);
-  }
-  selSet = new Set(copies); cur = pages.indexOf(copies[0]); anchor = cur; selRect = null;
+$('tDup').onclick = () => {   // nur die aktive Seite
+  const p = pages[cur]; if (!p || mode || clip) return;
+  const d = clonePage(p, p.name + ' (Kopie)');
+  pages.splice(cur + 1, 0, d);
+  selectOnly(cur + 1); selRect = null;
   rebuildThumbs(); syncUI(); draw();
-  setStatus(`${copies.length} Seite(n) dupliziert.`);
+  setStatus(`Seite ${cur} dupliziert.`);
 };
 
 /* ---------- Dateien ---------- */
