@@ -134,11 +134,15 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
       </div>
     </div>
     <div class="split" id="rSplit">
-      <button id="rAll" class="main" title="Drehung, 90°-Drehung, Verschiebung und Grösse pro Seite zurücksetzen">Alle Seiten zurücksetzen</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Andere Seiten zurücksetzen">▾</button>
+      <button id="rAll" class="main" title="Drehung, Grösse und Ausrichtung aller Seiten zurücksetzen, inkl. gemeinsamer Grösse">Zurücksetzen alles</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Einzeln oder für bestimmte Seiten zurücksetzen">▾</button>
       <div class="menu" id="rMenu" role="menu" hidden>
-        <button data-reset="sel" role="menuitem">Markierte Seiten zurücksetzen</button>
-        <button data-reset="odd" role="menuitem">Ungerade Seiten zurücksetzen</button>
-        <button data-reset="even" role="menuitem">Gerade Seiten zurücksetzen</button>
+        <div class="seg" id="rSeg" role="radiogroup" aria-label="Seiten">
+          <button data-g="all" role="radio">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
+        </div>
+        <button data-reset="all" role="menuitem">Alles</button>
+        <button data-reset="rot" role="menuitem" title="Feindrehung und 90°-Drehung">Drehung</button>
+        <button data-reset="size" role="menuitem" title="Alle: auch gemeinsame Grösse und Höhe. Sonst: Grösse pro Seite">Grösse</button>
+        <button data-reset="pos" role="menuitem" title="Verschiebung">Ausrichtung</button>
       </div>
     </div>
     <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
@@ -1144,16 +1148,25 @@ document.querySelectorAll('.split').forEach(root => {
   document.addEventListener('click', e => { if (!root.contains(e.target)) set(false); });
 });
 
-// Zurücksetzen: Feindrehung, 90°-Drehung, Verschiebung, Grösse pro Seite (Rechtecke und Stücke bleiben)
+// Zurücksetzen, aufgebaut wie die Automatik (Rechtecke, Teilungen und Stücke bleiben):
+// Drehung = fein + 90°, Grösse = pro Seite (bei «Alle» auch der gemeinsame Faktor), Ausrichtung = Verschiebung
 const GROUP = { all: 'Alle Seiten', sel: 'Markierte Seiten', odd: 'Ungerade Seiten', even: 'Gerade Seiten' };
-function resetPages(sel) {
-  const t = targetsFor(sel); if (!t.length) return;
-  t.forEach(p => { p.rot = 0; p.q = 0; p.dx = 0; p.dy = 0; p.k = 1; });
+const WHAT = { all: 'alles', rot: 'Drehung', size: 'Grösse', pos: 'Ausrichtung' };
+function resetPages(g, what) {
+  const t = g === 'all' ? pages : targetsFor(g); if (!t.length) return;
+  const any = k => what === 'all' || what === k;
+  t.forEach(p => {
+    if (any('rot')) { p.rot = 0; p.q = 0; }
+    if (any('size')) p.k = 1;
+    if (any('pos')) { p.dx = 0; p.dy = 0; }
+  });
+  if (g === 'all' && any('size')) { G.scale = 100; G.stx = 0; G.sty = 0; }
   syncUI(); draw(); drawAllThumbs();
-  setStatus(`${GROUP[sel]} zurückgesetzt (${t.length}).`);
+  setStatus(`Zurückgesetzt: ${GROUP[g]}, ${WHAT[what]} (${t.length}).`);
 }
-$('rAll').onclick = () => resetPages('all');
-document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => resetPages(b.dataset.reset));
+const resetGroup = () => { const b = document.querySelector('#rSeg .on'); return b ? b.dataset.g : 'all'; };
+$('rAll').onclick = () => resetPages('all', 'all');
+document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => resetPages(resetGroup(), b.dataset.reset));
 
 /* ---------- Seiten verwalten ---------- */
 function blankPage() {
