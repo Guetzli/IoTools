@@ -88,6 +88,7 @@ input::placeholder{color:var(--muted);font-style:italic}
 #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);pointer-events:none;padding:30px}
 #status{font-size:12px;color:var(--muted);min-height:1.4em;margin-top:8px}
 body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
+body.over #stage::after{content:attr(data-hint);position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;pointer-events:none;background:var(--acc);color:var(--accfg);font-size:18px;padding:12px 20px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3)}
 .hint{font-size:12px;color:var(--muted)}
 #busy{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.2);z-index:100;padding:16px}
 #busy.on{display:flex}
@@ -336,11 +337,13 @@ async function addPdf(f) {
   }
 }
 
-async function addFiles(list) {
+// opt.at = Einfügestelle (Standard: ans Ende), opt.replace = bestehende Seiten ersetzen (erst wenn etwas geladen ist)
+async function addFiles(list, opt = {}) {
   if (busy) { setStatus('Bitte warten, der aktuelle Import läuft noch.'); return; }
   const coll = new Intl.Collator(undefined, { numeric: true });
   const files = [...list].sort((a, b) => coll.compare(a.name, b.name));
   const first = pages.length;
+  let at = pages.length;
   setBusy(true, 'Lade Dateien …');
   try {
     for (const f of files) {
@@ -350,9 +353,14 @@ async function addFiles(list) {
         else setStatus('Nicht unterstützt: ' + f.name);
       } catch (e) { console.error(e); setStatus('Fehler bei ' + f.name + ': ' + e.message); }
     }
-    if (pages.length > first) {
-      selectOnly(first);
-      setStatus(`${pages.length} Seite(n) geladen.`);
+    const added = pages.splice(first);   // neu geladene Seiten an die gewünschte Stelle setzen
+    if (added.length) {
+      if (opt.replace) {
+        pages.length = 0; mode = null; clip = null; placing = null; rubber = null; selRect = null; at = 0;
+      } else at = Math.max(0, Math.min(opt.at ?? first, pages.length));
+      pages.splice(at, 0, ...added);
+      selectOnly(at);
+      setStatus(opt.replace ? `Ersetzt: ${added.length} Seite(n) geladen.` : `${added.length} Seite(n) geladen, jetzt ${pages.length}.`);
     }
   } finally {
     setBusy(false);
@@ -1268,11 +1276,41 @@ $('tDup').onclick = () => {   // nur die aktive Seite
 /* ---------- Dateien ---------- */
 $('bOpen').onclick = () => $('file').click();
 $('file').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
-// Nur Datei-Drags aufnehmen; das Umsortieren der Miniaturen läuft separat
+// Dateien ziehen (das Umsortieren der Miniaturen läuft separat):
+// - in die Mitte: ersetzt alle Seiten
+// - links in die Miniaturen: einfügen an der angezeigten Stelle (vor/nach einer Seite, links oben = Anfang, unten = Ende)
+// - rechts: nichts
 const hasFiles = e => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
-['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { if (!hasFiles(e)) return; e.preventDefault(); document.body.classList.add('over'); }));
-['dragleave', 'drop'].forEach(t => window.addEventListener(t, e => { if (!hasFiles(e)) return; e.preventDefault(); if (t === 'drop' || e.target === document.documentElement) document.body.classList.remove('over'); }));
-window.addEventListener('drop', e => { document.body.classList.remove('over'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+function fileDropTarget(e) {
+  if ($('stage').contains(e.target)) return { zone: 'stage' };
+  if (!$('left').contains(e.target)) return null;
+  const th = e.target.closest('.thumb'), p = th && pages.find(q => q.thumbEl === th);
+  if (p) { const r = th.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2; return { zone: 'left', at: pages.indexOf(p) + (after ? 1 : 0), el: th, side: after ? 'after' : 'before' }; }
+  if (!pages.length || e.target.closest('.tspacer')) return { zone: 'left', at: 0, el: pages[0] && pages[0].thumbEl, side: 'before' };
+  const last = pages[pages.length - 1]; return { zone: 'left', at: pages.length, el: last.thumbEl, side: 'after' };
+}
+function showFileDrop(t) {
+  document.body.classList.toggle('over', !!t && t.zone === 'stage');
+  $('stage').dataset.hint = pages.length ? 'Loslassen ersetzt alle Seiten' : 'Loslassen öffnet die Datei(en)';
+  document.querySelectorAll('.thumb[data-drop]').forEach(el => { if (!t || el !== t.el) delete el.dataset.drop; });
+  if (t && t.el) t.el.dataset.drop = t.side;
+}
+window.addEventListener('dragover', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  const t = busy ? null : fileDropTarget(e);
+  e.dataTransfer.dropEffect = t ? 'copy' : 'none';
+  showFileDrop(t);
+});
+window.addEventListener('dragleave', e => { if (hasFiles(e) && !e.relatedTarget) showFileDrop(null); });
+window.addEventListener('drop', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  const t = busy ? null : fileDropTarget(e);
+  showFileDrop(null);
+  if (!t || !e.dataTransfer.files.length) return;
+  addFiles(e.dataTransfer.files, t.zone === 'stage' ? { replace: true } : { at: t.at });
+});
 
 /* ---------- Export ---------- */
 $('eMode').onchange = () => { const s = $('eMode').value === 'small'; $('eSmall').hidden = !s; $('eSmallQ').hidden = !s; };
