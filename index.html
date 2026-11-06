@@ -235,10 +235,10 @@ function setProgress(f) {
 // Die Canvas-Bilder sind nur Vorschau und Analyse. Der Export lädt die Originaldaten (p.src) in voller Auflösung neu.
 const PREV_LONG = 2200;
 
-function makePage(c, name, src) {
+function makePage(c, name, src, an) {
   // layers: in Reihenfolge gezeichnet: weisse Rechtecke {t:'rect', poly} und eingefügte Stücke {t:'piece', …}
   const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, m: MARGIN0, layers: [], aspect: c.height / c.width, ink: null, thumb: null };
-  analyze(p);
+  if (an) Object.assign(p, an); else analyze(p);
   pages.push(p);
   return p;
 }
@@ -257,39 +257,77 @@ async function addImage(f) {
   makePage(c, f.name, { kind: 'img', bytes });
 }
 
-// grösste eingebettete Bildbreite einer PDF-Seite (um die Scan-Auflösung zu erkennen)
-async function pdfImageWidth(pg) {
-  try {
-    const ops = await pg.getOperatorList(), O = pdfjsLib.OPS;
-    let best = 0;
-    ops.fnArray.forEach((fn, i) => {
-      if (fn === O.paintImageXObject || fn === O.paintInlineImageXObject || fn === O.paintImageMaskXObject) {
-        const a = ops.argsArray[i];
-        const w = (a[0] && typeof a[0] === 'object') ? a[0].width : a[1];
-        if (w > best) best = w;
-      }
-    });
-    return best;
-  } catch (e) { return 0; }
+// Seiten werden auf mehrere pdf.js-Worker verteilt (je einer pro Dokumentkopie), so viele wie sinnvoll:
+// höchstens Kerne − 1, höchstens 8. Übernommen werden die Seiten in ihrer Reihenfolge.
+let anaPool = null;
+// Vorschau als ImageBitmap an einen Worker; dort verkleinern, auslesen und analysieren (braucht OffscreenCanvas)
+async function analyzeInWorker(c) {
+  if (typeof OffscreenCanvas === 'undefined') { const { d, w, h } = analyzeInput({ prev: c }); return analyzePixels(d, w, h); }
+  if (!anaPool) {
+    const src = [shadowBands, analyzePixels].map(String).join(';') +
+      ';onmessage = e => { const { id, bmp, w, h } = e.data, oc = new OffscreenCanvas(w, h), x = oc.getContext("2d", { willReadFrequently: true });' +
+      ' x.fillStyle = "#fff"; x.fillRect(0, 0, w, h); x.drawImage(bmp, 0, 0, w, h); bmp.close();' +
+      ' const r = analyzePixels(x.getImageData(0, 0, w, h).data, w, h); postMessage({ id, r }, [r.ink.buffer]); };';
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 1));
+    anaPool = { ws: Array.from({ length: n }, () => new Worker(url)), next: 0, id: 0, wait: new Map() };
+    anaPool.ws.forEach(wk => wk.onmessage = e => { const f = anaPool.wait.get(e.data.id); anaPool.wait.delete(e.data.id); f(e.data.r); });
+  }
+  const P = anaPool, id = ++P.id, wk = P.ws[P.next++ % P.ws.length];
+  const sc = Math.min(1, 1500 / c.width), w = Math.max(1, Math.round(c.width * sc)), h = Math.max(1, Math.round(c.height * sc));
+  const bmp = await createImageBitmap(c);
+  return new Promise(res => { P.wait.set(id, res); wk.postMessage({ id, bmp, w, h }, [bmp]); });
 }
-
+// Grösste Bildbreite im PDF aus den Bild-Wörterbüchern (unkomprimierter Text, Bilder sind nie in Objektströmen).
+// Viel schneller als pdf.js-Operatorlisten, die jedes Bild dekodieren. Gilt für alle Seiten der Datei.
+function pdfMaxImageWidth(bytes) {
+  const s = new TextDecoder('latin1').decode(bytes), re = /\/Subtype\s*\/Image/g;
+  let m, best = 0;
+  while ((m = re.exec(s))) {
+    const a = s.lastIndexOf('obj', m.index), b = s.indexOf('stream', m.index);
+    const dict = s.slice(a < 0 ? Math.max(0, m.index - 2000) : a, b < 0 ? m.index + 2000 : b);
+    const w = /\/Width\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
+    if (w) best = Math.max(best, +w[1]);
+  }
+  return best;
+}
 async function addPdf(f) {
   if (!window.pdfjsLib) throw new Error('pdf.js konnte nicht geladen werden (Internet?)');
   const bytes = await f.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
-  for (let i = 1; i <= doc.numPages; i++) {
-    setStatus(`${f.name}: Seite ${i}/${doc.numPages} …`);
-    const pg = await doc.getPage(i);
-    const v1 = pg.getViewport({ scale: 1 });
-    const sc = PREV_LONG / Math.max(v1.width, v1.height);
-    const vp = pg.getViewport({ scale: sc });
-    const c = document.createElement('canvas');
-    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
-    const x = c.getContext('2d');
-    x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-    await pg.render({ canvasContext: x, viewport: vp }).promise;
-    makePage(c, `${f.name} S.${i}`, { kind: 'pdf', bytes, index: i - 1, pxW: await pdfImageWidth(pg) });
-    await new Promise(r => setTimeout(r));
+  const open = () => pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;   // eigener Worker pro Dokument
+  const first = await open(), n = first.numPages, pxW = pdfMaxImageWidth(bytes);
+  const k = Math.max(1, Math.min(n, 8, (navigator.hardwareConcurrency || 2) - 1));
+  const docs = [first, ...await Promise.all(Array.from({ length: k - 1 }, open))];
+  const done = Array.from({ length: n }, () => { let res, rej; const pr = new Promise((a, b) => { res = a; rej = b; }); return { pr, res, rej }; });
+  let next = 0, rendered = 0;
+  const run = async doc => {
+    while (next < n) {
+      const i = next++;
+      try {
+        const pg = await doc.getPage(i + 1);
+        const v1 = pg.getViewport({ scale: 1 });
+        const vp = pg.getViewport({ scale: PREV_LONG / Math.max(v1.width, v1.height) });
+        const c = document.createElement('canvas');
+        c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        const x = c.getContext('2d');
+        x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+        await pg.render({ canvasContext: x, viewport: vp }).promise;
+        pg.cleanup();
+        const an = await analyzeInWorker(c);
+        setStatus(`${f.name}: ${++rendered}/${n} Seiten gelesen …`);
+        done[i].res({ c, an });
+      } catch (e) { done[i].rej(e); }
+    }
+  };
+  const pool = Promise.all(docs.map(run));
+  try {
+    for (let i = 0; i < n; i++) {   // Seiten in ihrer Reihenfolge übernehmen
+      const { c, an } = await done[i].pr;
+      makePage(c, `${f.name} S.${i + 1}`, { kind: 'pdf', bytes, index: i, pxW }, an);
+    }
+  } finally {
+    await pool.catch(() => {});
+    docs.forEach(d => d.destroy());
   }
 }
 
@@ -438,14 +476,19 @@ const rectFromMm = (p, x0, y0, x1, y1) => ({ t: 'rect', poly: [[x0, y0], [x1, y0
 const cloneLayer = l => l.t === 'rect' ? { t: 'rect', poly: l.poly.map(pt => [...pt]) } : { ...l };
 
 /* ---------- Analyse ---------- */
-function analyze(p) {
+// Analyse in zwei Teilen: Pixel der Vorschau holen (braucht Canvas, Hauptthread) und rechnen (reine Funktion,
+// läuft beim PDF-Laden in Web-Workern parallel)
+function analyzeInput(p) {
   const c = p.prev, sc = Math.min(1, 1500 / c.width);
   const w = Math.max(1, Math.round(c.width * sc)), h = Math.max(1, Math.round(c.height * sc));
   const t = document.createElement('canvas'); t.width = w; t.height = h;
   const x = t.getContext('2d', { willReadFrequently: true });
   x.fillStyle = '#fff'; x.fillRect(0, 0, w, h);
   x.drawImage(c, 0, 0, w, h);
-  const d = x.getImageData(0, 0, w, h).data;
+  return { d: x.getImageData(0, 0, w, h).data, w, h };
+}
+function analyze(p) { const { d, w, h } = analyzeInput(p); Object.assign(p, analyzePixels(d, w, h)); }
+function analyzePixels(d, w, h) {
   const g = new Uint8Array(w * h), hist = new Uint32Array(256);
   for (let i = 0; i < w * h; i++) {
     const v = (d[4 * i] * 0.299 + d[4 * i + 1] * 0.587 + d[4 * i + 2] * 0.114) | 0;
@@ -467,7 +510,7 @@ function analyze(p) {
   for (let i = 0; i < w * h; i++) mk[i] = g[i] <= thr ? 1 : 0;
   const sh = shadowBands(mk, null, w, h, Math.max(3, Math.round(w * 1.5 / 210)));
   for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (sh.col[xx] || sh.row[yy]) mk[yy * w + xx] = 0;
-  p.shadow = { col: sh.col, row: sh.row, w, h };   // für measure(): Schatten liegen parallel zum Scanrand
+  const shadow = { col: sh.col, row: sh.row, w, h };   // für measure(): Schatten liegen parallel zum Scanrand
   const mx = Math.round(w * 0.01), my = Math.round(h * 0.01);
   let n = 0;
   for (let yy = my; yy < h - my; yy++) for (let xx = mx; xx < w - mx; xx++) if (mk[yy * w + xx] === 1) n++;
@@ -477,7 +520,7 @@ function analyze(p) {
   for (let yy = my; yy < h - my; yy++) for (let xx = mx; xx < w - mx; xx++) {
     if (mk[yy * w + xx] === 1 && (c2++ % stride) === 0) { pts[k++] = (xx + .5) / w; pts[k++] = (yy + .5) / h; }
   }
-  p.ink = pts.subarray(0, k);
+  return { shadow, ink: pts.slice(0, k) };
 }
 
 // Tintenpunkte in mm relativ zur Seitenmitte (Seitendrehung q angewendet, feine Drehung noch nicht)
