@@ -38,6 +38,13 @@ button:disabled{opacity:.4;cursor:default}
 .tspacer{display:flex;align-items:center;justify-content:center;aspect-ratio:210/297}
 .tspacer button{font-size:18px;padding:6px 14px}
 .tspacer button:hover:not(:disabled){border-color:rgba(200,40,40,.95);color:rgba(200,40,40,.95)}
+.split{position:relative;display:flex;margin:5px 0}
+.split #aAll{flex:1;border-radius:6px 0 0 6px}
+.split #aMore{border-radius:0 6px 6px 0;border-left:1px solid rgba(255,255,255,.45);padding:5px 11px}
+.menu{position:absolute;top:100%;left:0;right:0;z-index:20;margin-top:4px;padding:4px;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.menu[hidden]{display:none}
+.menu button{border:none;background:transparent;text-align:left;padding:7px 10px}
+.menu button:hover{background:var(--bg)}
 #tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .thumb.dragging{opacity:.4}
 .thumb[data-drop=before]::before,.thumb[data-drop=after]::after{content:'';position:absolute;left:-6px;right:-6px;height:3px;background:var(--acc);border-radius:2px}
@@ -105,12 +112,17 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
 
     <h3>Alle Seiten gleich</h3>
     <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" value="100"></div>
-    <div class="row"><label>Breite zusätzlich (%)</label><input id="gStx" type="number" step="0.5" value="0"></div>
     <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
 
     <h3>Automatik</h3>
-    <div class="row btns"><button id="aAll" class="primary">Alles automatisch</button></div>
-    <div class="row btns"><button id="aRot">Gerade drehen</button><button id="aScale">Grösse</button><button id="aAlign">Ausrichten</button></div>
+    <div class="split" id="aSplit">
+      <button id="aAll" class="primary">Alles automatisch</button><button id="aMore" class="primary" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
+      <div class="menu" id="aMenu" role="menu" hidden>
+        <button id="aRot" role="menuitem">Gerade drehen</button>
+        <button id="aScale" role="menuitem">Grösse</button>
+        <button id="aAlign" role="menuitem">Ausrichten</button>
+      </div>
+    </div>
     <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
     <p class="hint">«Grösse»: Der Faktor wird an der grössten der mittleren Seite(n) bestimmt (bei 10 Seiten Seite 5 und 6), sodass der Inhalt in die Fläche innerhalb des Rands passt, und gilt für alle Seiten. Hat der Inhalt in einer Dimension Luft, wird er dort zusätzlich um höchstens 10 % gestreckt. Eigene Werte kannst du oben in «Alle Seiten gleich» eintragen.</p>
 
@@ -524,9 +536,11 @@ function autoScale() {
   const aw = A4W - 2 * m, ah = A4H - 2 * m;
   const s = Math.min(aw / best.w, ah / best.h);
   const slackX = aw / (best.w * s) - 1, slackY = ah / (best.h * s) - 1; // eine Dimension ist 0
-  G.scale = Math.round(s * 10000) / 100;
-  G.stx = Math.floor(Math.min(slackX, 0.10) * 1000) / 10;
-  G.sty = Math.floor(Math.min(slackY, 0.10) * 1000) / 10;
+  // Streckung um höchstens 10 % in der Dimension mit Luft; ausgedrückt nur über Grösse und Höhe
+  const sx = Math.min(slackX, 0.10), sy = Math.min(slackY, 0.10);
+  G.scale = Math.floor(s * (1 + sx) * 10000) / 100;
+  G.stx = 0;
+  G.sty = Math.floor(((1 + sy) / (1 + sx) - 1) * 1000) / 10;
 }
 
 function autoAlign(list) {
@@ -746,7 +760,7 @@ function syncUI() {
     const qs = targetsFor($('gSel').value).map(x => x.q);
     b.style.borderColor = qs.length && qs.every(v => v === +b.dataset.q) ? 'var(--acc)' : '';
   });
-  $('gScale').value = G.scale; $('gStx').value = G.stx; $('gSty').value = G.sty;
+  $('gScale').value = G.scale; $('gSty').value = G.sty;
   markSel();
 }
 
@@ -960,13 +974,18 @@ document.addEventListener('keydown', e => {
 });
 
 const gIn = (id, key) => $(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (isFinite(v)) { G[key] = key === 'scale' ? Math.max(10, v) : v; draw(); drawAllThumbs(); } });
-gIn('gScale', 'scale'); gIn('gStx', 'stx'); gIn('gSty', 'sty');
+gIn('gScale', 'scale'); gIn('gSty', 'sty');   // Breite folgt aus «Grösse», «Höhe zusätzlich» darf negativ sein
 
 const withBusy = fn => () => { if (!pages.length) return; document.body.style.cursor = 'progress'; setTimeout(() => { fn(); document.body.style.cursor = ''; syncUI(); draw(); drawAllThumbs(); }, 10); };
 $('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
 $('aRot').onclick = withBusy(() => autoRotate(pages));
 $('aScale').onclick = withBusy(() => autoScale());
 $('aAlign').onclick = withBusy(() => autoAlign(pages));
+// Split-Button: ▾ klappt die einzelnen Automatiken auf; Auswahl oder Klick daneben schliesst
+const setAutoMenu = open => { $('aMenu').hidden = !open; $('aMore').setAttribute('aria-expanded', open); };
+$('aMore').onclick = e => { e.stopPropagation(); setAutoMenu($('aMenu').hidden); };
+$('aMenu').addEventListener('click', () => setAutoMenu(false));
+document.addEventListener('click', e => { if (!$('aSplit').contains(e.target)) setAutoMenu(false); });
 $('bReset').onclick = () => { targetsFor('sel').forEach(p => { p.rot = 0; p.q = 0; p.dx = 0; p.dy = 0; p.k = 1; }); syncUI(); draw(); drawAllThumbs(); };
 $('pK').addEventListener('input', e => {
   const v = parseFloat(e.target.value);
