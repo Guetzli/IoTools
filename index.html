@@ -172,15 +172,15 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <h3>Export</h3>
     <div class="row"><label>Modus</label>
       <select id="eMode">
-        <option value="png">Original (PNG, verlustfrei)</option>
-        <option value="jpg">Original (JPEG 95 %)</option>
+        <option value="auto">Volle Auflösung (wie Quelle)</option>
+        <option value="png">Volle Auflösung, verlustfrei (PNG)</option>
         <option value="small">Verkleinert</option>
       </select></div>
     <div class="row" id="eSmall" hidden><label>Auflösung</label>
       <select id="eDpi"><option>100</option><option>150</option><option selected>200</option><option>300</option></select></div>
     <div class="row" id="eSmallQ" hidden><label>JPEG-Qualität</label>
       <select id="eQ"><option value="0.6">60 %</option><option value="0.75" selected>75 %</option><option value="0.85">85 %</option></select></div>
-    <p class="hint">Der Export rechnet jede Seite aus dem Originalscan neu auf A4. Was ausserhalb von A4 liegt, ist danach nicht mehr in der PDF enthalten. «Original» nutzt die Scan-Auflösung.</p>
+    <p class="hint">Der Export rechnet jede Seite aus dem Originalscan neu auf A4. Was ausserhalb von A4 liegt, ist danach nicht mehr in der PDF enthalten. «Volle Auflösung» nutzt die Scan-Auflösung. «Wie Quelle» speichert als PNG, wenn die Seite aus PNG-, BMP- oder GIF-Bildern stammt, sonst (PDF, JPEG) als JPEG 95 %.</p>
     <div class="row btns"><button id="bExport" class="primary" disabled>Als A4-PDF speichern</button></div>
     <div id="status"></div>
   </aside>
@@ -1201,6 +1201,16 @@ window.addEventListener('drop', e => { document.body.classList.remove('over'); i
 $('eMode').onchange = () => { const s = $('eMode').value === 'small'; $('eSmall').hidden = !s; $('eSmallQ').hidden = !s; };
 
 // Originalquelle in voller Auflösung laden (Bild oder gerenderte PDF-Seite)
+// Verlustfreie Quelle? Nur PNG-, BMP- und GIF-Bilder (an den ersten Bytes erkannt); PDF-Scans enthalten fast immer JPEG
+function losslessSrc(s) {
+  if (s.kind !== 'img') return false;
+  const b = new Uint8Array(s.bytes, 0, Math.min(4, s.bytes.byteLength));
+  return (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) || (b[0] === 0x42 && b[1] === 0x4D) || (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46);
+}
+// «Wie Quelle»: PNG nur, wenn alle beteiligten Scans (Seite und eingefügte Stücke) verlustfrei sind
+function pageLossless(q) {
+  return (q.src.kind === 'blank' || losslessSrc(q.src)) && q.layers.every(l => l.t !== 'piece' || pageLossless(l.snap));
+}
 async function loadSource(p, cache) {
   const s = p.src;
   if (s.kind === 'blank') return p.prev;
@@ -1251,8 +1261,8 @@ $('bExport').onclick = async () => {
       const c = document.createElement('canvas'); c.width = Math.round(A4W * ppm); c.height = Math.round(A4H * ppm);
       renderPage(c.getContext('2d'), p, c.width / A4W, q => imgs.get(q.src) || q.prev);
       imgs.forEach(im => im.close && im.close());
-      const png = mode === 'png';
-      const blob = await new Promise(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', mode === 'jpg' ? 0.95 : qSmall));
+      const png = mode === 'png' || (mode === 'auto' && pageLossless(p));
+      const blob = await new Promise(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', mode === 'small' ? qSmall : 0.95));
       c.width = c.height = 1;
       const bytesImg = new Uint8Array(await blob.arrayBuffer());
       const emb = png ? await doc.embedPng(bytesImg) : await doc.embedJpg(bytesImg);
