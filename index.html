@@ -46,11 +46,16 @@ button:disabled{opacity:.4;cursor:default}
 .menu[hidden]{display:none}
 .menu button{border:none;background:transparent;text-align:left;padding:7px 10px}
 .menu button:hover{background:var(--bg)}
-.menu .seg{display:flex;margin:2px 2px 6px}
-.menu .seg button{flex:1;text-align:center;font-size:12px;padding:4px 2px;border:1px solid var(--line);border-radius:0;margin-left:-1px;background:var(--panel)}
-.menu .seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
-.menu .seg button:last-child{border-radius:0 6px 6px 0}
-.menu .seg button.on{background:var(--acc);color:var(--accfg);border-color:var(--acc);position:relative}
+.seg{display:flex;margin:5px 0}
+.menu .seg{margin:2px 2px 6px}
+.seg button,.menu .seg button{flex:1;text-align:center;font-size:12px;padding:4px 2px;border:1px solid var(--line);border-radius:0;margin-left:-1px;background:var(--panel)}
+.seg button:first-child,.menu .seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
+.seg button:last-child,.menu .seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on,.menu .seg button.on{background:var(--acc);color:var(--accfg);border-color:var(--acc);position:relative}
+.rotq button{display:flex;justify-content:center;padding:4px}
+.rotq svg{width:22px;height:22px;overflow:visible;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.rotq .guide{stroke-opacity:.3;stroke-width:1.4;stroke-dasharray:1.6 2.2}
+input::placeholder{color:var(--muted);font-style:italic}
 .menu .sep{height:1px;background:var(--line);margin:4px 2px}
 #tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .thumb.dragging{opacity:.4}
@@ -115,11 +120,18 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
     <h3>Dateien</h3>
     <div class="row"><button id="bOpen" class="primary">Dateien öffnen …</button></div>
     <input id="file" type="file" accept="application/pdf,image/*" multiple hidden>
-    <label class="row"><input type="checkbox" id="cDual" checked> Doppelseite anzeigen</label>
 
-    <h3>Alle Seiten gleich</h3>
-    <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" value="100"></div>
+    <h3>Seiten anpassen</h3>
+    <div class="seg" id="pSeg" role="radiogroup" aria-label="Seiten">
+      <button data-g="all" role="radio" class="on" aria-checked="true">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
+    </div>
+    <div class="row"><label>Grösse (%)</label><input id="gScale" type="number" step="0.5" min="10" value="100"></div>
     <div class="row"><label>Höhe zusätzlich (%)</label><input id="gSty" type="number" step="0.5" value="0"></div>
+    <div class="row btns rotq">
+      <button data-dq="-90" title="90° gegen den Uhrzeigersinn drehen" aria-label="90° gegen den Uhrzeigersinn drehen"><svg viewBox="-1 -1 26 26"><circle class="guide" cx="12" cy="12" r="8"/><path d="M12 4A8 8 0 0 0 4 12"/><path d="M1.3 9.3L4 12.6L6.7 9.3"/></svg></button>
+      <button data-dq="180" title="180° drehen" aria-label="180° drehen"><svg viewBox="-1 -1 26 26"><circle class="guide" cx="12" cy="12" r="8"/><path d="M12 4A8 8 0 0 1 12 20"/><path d="M14.7 17.3L11.4 20L14.7 22.7"/></svg></button>
+      <button data-dq="90" title="90° im Uhrzeigersinn drehen" aria-label="90° im Uhrzeigersinn drehen"><svg viewBox="-1 -1 26 26"><circle class="guide" cx="12" cy="12" r="8"/><path d="M12 4A8 8 0 0 1 20 12"/><path d="M17.3 9.3L20 12.6L22.7 9.3"/></svg></button>
+    </div>
 
     <div class="split" id="aSplit">
       <button id="aAll" class="primary main" title="Gerade drehen, Grösse und Ausrichten nacheinander">Automatisch alles</button><button id="aMore" class="primary more" aria-haspopup="menu" aria-expanded="false" title="Einzelne Automatik wählen">▾</button>
@@ -129,34 +141,23 @@ body.over #stage{outline:3px dashed var(--acc);outline-offset:-8px}
         </div>
         <button id="aAllG" role="menuitem">Alles</button>
         <button id="aRot" role="menuitem">Gerade drehen</button>
-        <button id="aScale" role="menuitem" title="Alle: gemeinsamer Faktor. Sonst: Grösse pro Seite der gewählten Seiten">Grösse</button>
+        <button id="aScale" role="menuitem" title="Gleiche Grösse für die gewählten Seiten, sodass nichts über den Rand ragt">Grösse</button>
         <button id="aAlign" role="menuitem">Ausrichten</button>
       </div>
     </div>
     <div class="split" id="rSplit">
-      <button id="rAll" class="main" title="Drehung, Grösse und Ausrichtung aller Seiten zurücksetzen, inkl. gemeinsamer Grösse">Zurücksetzen alles</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Einzeln oder für bestimmte Seiten zurücksetzen">▾</button>
+      <button id="rAll" class="main" title="Drehung, Grösse und Ausrichtung aller Seiten zurücksetzen">Zurücksetzen alles</button><button id="rMore" class="more" aria-haspopup="menu" aria-expanded="false" title="Einzeln oder für bestimmte Seiten zurücksetzen">▾</button>
       <div class="menu" id="rMenu" role="menu" hidden>
         <div class="seg" id="rSeg" role="radiogroup" aria-label="Seiten">
           <button data-g="all" role="radio">Alle</button><button data-g="sel" role="radio">Markierte</button><button data-g="odd" role="radio">Ungerade</button><button data-g="even" role="radio">Gerade</button>
         </div>
         <button data-reset="all" role="menuitem">Alles</button>
         <button data-reset="rot" role="menuitem" title="Feindrehung und 90°-Drehung">Drehung</button>
-        <button data-reset="size" role="menuitem" title="Alle: auch gemeinsame Grösse und Höhe. Sonst: Grösse pro Seite">Grösse</button>
+        <button data-reset="size" role="menuitem" title="Grösse und Höhe zusätzlich">Grösse</button>
         <button data-reset="pos" role="menuitem" title="Verschiebung">Ausrichtung</button>
       </div>
     </div>
     <div class="row"><label>Rand (mm, alle Seiten)</label><input id="mR" type="number" value="12" step="1" min="0"></div>
-
-    <h3>Seiten drehen / skalieren</h3>
-    <div class="row"><label>Seiten</label>
-      <select id="gSel">
-        <option value="sel">Markierte Seiten</option>
-        <option value="odd">Ungerade (1, 3, 5 …)</option>
-        <option value="even">Gerade (2, 4, 6 …)</option>
-        <option value="all">Alle</option>
-      </select></div>
-    <div class="row btns"><button data-q="0">0°</button><button data-q="90">90°</button><button data-q="180">180°</button><button data-q="270">270°</button></div>
-    <div class="row"><label>Grösse (%)</label><input id="gGK" type="number" step="0.5" min="10" value="100"></div>
 
     <h3>Verschieben</h3>
     <div class="row"><label>Verschieben wirkt auf</label>
@@ -208,7 +209,6 @@ const pages = [];
 let cur = -1;                 // aktive Seite (Index)
 let selSet = new Set();       // markierte Seiten (Seitenobjekte)
 let anchor = 0;               // Ankerseite für Shift-Auswahl
-const G = { scale: 100, stx: 0, sty: 0 };
 let rectMode = false, rubber = null, selRect = null;   // weisse Rechtecke (selRect = Ebene)
 // Werkzeugleiste: mode = 'split' | 'cut' | 'place' | null; clip = ausgeschnittenes, noch nicht fertig eingefügtes Stück
 let mode = null, clip = null, placing = null, splitY = 0;
@@ -237,7 +237,7 @@ const PREV_LONG = 2200;
 
 function makePage(c, name, src) {
   // layers: in Reihenfolge gezeichnet: weisse Rechtecke {t:'rect', poly} und eingefügte Stücke {t:'piece', …}
-  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, layers: [], aspect: c.height / c.width, ink: null, thumb: null };
+  const p = { name, src, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, layers: [], aspect: c.height / c.width, ink: null, thumb: null };
   analyze(p);
   pages.push(p);
   return p;
@@ -353,23 +353,24 @@ function targetsFor(sel) {
 }
 
 /* ---------- Geometrie ---------- */
-// Ausgeschnittene Stücke tragen ihre eigenen, beim Ausschneiden eingefrorenen Werte (p.G)
+// Jede Seite hat ihre eigene Grösse (p.k) und Höhe zusätzlich (p.sy, %); ausgeschnittene Stücke tragen
+// die beim Ausschneiden eingefrorenen Werte im Schnappschuss
 function factors(p) {
-  const g = p.G || G, k = g.scale / 100 * p.k, odd = p.q % 180 !== 0;
-  // Breite/Höhe-Streckung gelten für die Seite; bei 90°/270° liegen die Bildachsen vertauscht
+  const k = p.k, sy = 1 + (p.sy || 0) / 100, odd = p.q % 180 !== 0;
+  // Die Höhenstreckung gilt für die Seite; bei 90°/270° liegt sie auf der Bildbreite
   return odd
-    ? { fx: A4W * k * (1 + g.sty / 100) / p.aspect, fy: A4W * k * (1 + g.stx / 100) }
-    : { fx: A4W * k * (1 + g.stx / 100), fy: A4W * k * (1 + g.sty / 100) * p.aspect };
+    ? { fx: A4W * k * sy / p.aspect, fy: A4W * k }
+    : { fx: A4W * k, fy: A4W * k * sy * p.aspect };
 }
 
 // Bildkoordinaten -> Seite: Verschiebung, Drehung (grob + fein), Skalierung in Bildachsen
 function setPageTransform(ctx, p, ppm, img) {
   const W = A4W * ppm, H = A4H * ppm, odd = p.q % 180 !== 0;
   // Nach der Drehung bestimmt die waagrechte Seitenausdehnung den Grundmassstab (bei 90°/270° die Bildhöhe)
-  const g = p.G || G, k = g.scale / 100 * p.k, base = A4W * ppm / (odd ? img.height : img.width);
+  const k = p.k, sy = 1 + (p.sy || 0) / 100, base = A4W * ppm / (odd ? img.height : img.width);
   ctx.translate(W / 2 + p.dx * ppm, H / 2 + p.dy * ppm);
   ctx.rotate(rad(p.rot + p.q));
-  ctx.scale(base * k * (1 + (odd ? g.sty : g.stx) / 100), base * k * (1 + (odd ? g.stx : g.sty) / 100));
+  ctx.scale(base * k * (odd ? sy : 1), base * k * (odd ? 1 : sy));
 }
 
 // Punkt (u,v) in Bildkoordinaten (0..1) innerhalb eines konvexen Vierecks?
@@ -657,25 +658,20 @@ function measure(p) {
 
 function autoRotate(list) { for (const p of list) p.rot = detectAngle(p); }
 
-// Grösse: die Seiten der Liste messen; die breiteste und die höchste bestimmen den Faktor, sodass keine
-// davon über den Rand ragt. Keine Streckung.
-// - alle Seiten (list === pages): gemeinsamer Faktor unter «Alle Seiten gleich», Grösse pro Seite überall 100 %
-// - Teilmenge: Grösse pro Seite dieser Seiten (relativ zum gemeinsamen Faktor), die übrigen bleiben
+// Grösse: die Seiten der Liste messen; die breiteste und die höchste bestimmen einen gemeinsamen Faktor,
+// sodass keine davon über den Rand ragt. Keine Streckung (Höhe zusätzlich = 0). Übrige Seiten bleiben.
 function autoScale(list = pages) {
   if (!list.length) return;
-  const shared = list === pages, sv = { ...G }, ks = list.map(p => p.k);
-  if (shared) { G.scale = 100; G.stx = 0; G.sty = 0; }
-  list.forEach(p => { p.k = 1; });
+  const sv = list.map(p => [p.k, p.sy]);
+  list.forEach(p => { p.k = 1; p.sy = 0; });
   let maxW = 0, maxH = 0;
   for (const p of list) {
     const b = measure(p);
     if (b) { maxW = Math.max(maxW, b.R - b.L); maxH = Math.max(maxH, b.B - b.T); }
   }
-  if (shared) Object.assign(G, sv);
-  if (!maxW || !maxH) { list.forEach((p, i) => { p.k = ks[i]; }); return; }
+  if (!maxW || !maxH) { list.forEach((p, i) => { [p.k, p.sy] = sv[i]; }); return; }
   const m = margin(), s = Math.min((A4W - 2 * m) / maxW, (A4H - 2 * m) / maxH);
-  if (shared) { G.scale = Math.floor(s * 10000) / 100; G.stx = 0; G.sty = 0; }
-  else list.forEach(p => { p.k = Math.floor(s * 10000) / 10000; });
+  list.forEach(p => { p.k = Math.floor(s * 10000) / 10000; });
 }
 
 function autoAlign(list) {
@@ -692,10 +688,9 @@ function autoAll(from = 0) {
 }
 
 /* ---------- Anzeige ---------- */
-// Ansichten: links/rechts. Doppelseite: Seite 1 rechts, 2 links, 3 rechts, …; links oben bleibt leer.
+// Ansichten: immer Doppelseite. Seite 1 rechts, 2 links, 3 rechts, …; links von Seite 1 bleibt leer.
 const views = [{ cv: $('cvL') }, { cv: $('cvR') }];
 function viewIdxs() {
-  if (!$('cDual').checked) return [-2, cur];
   const s = Math.floor((cur + 1) / 2);
   return [2 * s - 1, 2 * s];
 }
@@ -707,7 +702,6 @@ function draw() {
     const idxs = viewIdxs();
     views.forEach((v, vi) => {
       const cv = v.cv, ctx = cv.getContext('2d'), idx = idxs[vi], p = pages[idx];
-      cv.style.display = idx === -2 ? 'none' : '';
       cv.classList.toggle('empty', !p);
       cv.classList.toggle('cur', !!p && idx === cur);
       cv.classList.toggle('sel', !!p && idx !== cur && selSet.has(p));
@@ -774,16 +768,16 @@ function draw() {
 }
 
 function fitCanvas() {
-  const st = $('stage'), rw = $('rotWrap'), dual = $('cDual').checked, gap = 14;
+  const st = $('stage'), rw = $('rotWrap'), gap = 14;
   const availW = st.clientWidth - 24, availH = st.clientHeight - rw.offsetHeight - $('tools').offsetHeight - 24 - 20;
-  const perW = dual ? (availW - gap) / 2 : availW;
+  const perW = (availW - gap) / 2;
   const w = Math.max(80, Math.min(perW, availH * A4W / A4H)), h = w * A4H / A4W;
   const dpr = window.devicePixelRatio || 1;
   views.forEach(v => {
     v.cv.style.width = w + 'px'; v.cv.style.height = h + 'px';
     v.cv.width = Math.round(w * dpr); v.cv.height = Math.round(h * dpr);
   });
-  rw.style.width = (dual ? 2 * w + gap : w) + 'px';
+  rw.style.width = (2 * w + gap) + 'px';
   draw();
 }
 
@@ -888,13 +882,14 @@ function syncUI() {
   const sv = p ? -p.rot : 0;
   $('rot').value = sv;
   $('rotVal').textContent = (Math.abs(sv) < 0.005 ? 0 : sv).toFixed(2).replace('.', ',') + '°';
-  const g0 = targetsFor($('gSel').value)[0];
-  if (g0 && document.activeElement !== $('gGK')) $('gGK').value = Math.round(g0.k * 10000) / 100;
-  document.querySelectorAll('[data-q]').forEach(b => {
-    const qs = targetsFor($('gSel').value).map(x => x.q);
-    b.style.borderColor = qs.length && qs.every(v => v === +b.dataset.q) ? 'var(--acc)' : '';
+  // Grösse / Höhe der gewählten Seitengruppe; verschiedene Werte: leeres Feld mit «gemischt»
+  const t = targetsFor(pageGroup());
+  [['gScale', p => Math.round(p.k * 10000) / 100], ['gSty', p => Math.round((p.sy || 0) * 100) / 100]].forEach(([id, f]) => {
+    const el = $(id); if (document.activeElement === el) return;
+    const vs = [...new Set(t.map(f))];
+    el.value = vs.length === 1 ? vs[0] : '';
+    el.placeholder = vs.length > 1 ? 'gemischt' : '';
   });
-  $('gScale').value = G.scale; $('gSty').value = G.sty;
   markSel();
 }
 
@@ -908,7 +903,6 @@ function bumpGrid() {
 $('rot').addEventListener('pointerdown', () => { gridHeld = true; });
 window.addEventListener('pointerup', () => { if (gridHeld) { gridHeld = false; bumpGrid(); } });
 $('mR').addEventListener('input', () => { draw(); drawAllThumbs(); });
-$('cDual').onchange = fitCanvas;
 
 const clampRot = v => Math.max(-3, Math.min(3, Math.round(v * 100) / 100));
 // Die aktive Seite erhält den Wert; weitere markierte Seiten werden um dieselbe Differenz gedreht
@@ -930,17 +924,25 @@ function shift(ddx, ddy) {
   targetsFor(sel).forEach(p => { p.dx += ddx; p.dy += ddy; });
   draw(); if (sel !== 'sel') drawAllThumbs();
 }
-document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
-  targetsFor($('gSel').value).forEach(p => { p.q = +b.dataset.q; });
+// «Seiten anpassen»: Umschalter wählt die Gruppe (bleibt stehen), Drehen relativ in 90°-Schritten
+const pageGroup = () => { const b = document.querySelector('#pSeg .on'); return b ? b.dataset.g : 'all'; };
+$('pSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setSeg($('pSeg'), b); syncUI(); } });
+document.querySelectorAll('[data-dq]').forEach(b => b.onclick = () => {
+  const d = +b.dataset.dq;
+  targetsFor(pageGroup()).forEach(p => { p.q = ((p.q + d) % 360 + 360) % 360; });
   syncUI(); draw(); drawAllThumbs();
 });
-$('gGK').addEventListener('input', e => {
-  const v = parseFloat(e.target.value);
-  if (!isFinite(v) || v < 10) return;
-  targetsFor($('gSel').value).forEach(p => { p.k = v / 100; });
-  syncUI(); draw(); drawAllThumbs();
+$('gScale').addEventListener('input', e => {
+  const v = parseFloat(e.target.value); if (!isFinite(v) || v < 10) return;
+  targetsFor(pageGroup()).forEach(p => { p.k = v / 100; });
+  draw(); drawAllThumbs();
 });
-$('gSel').onchange = () => syncUI();
+$('gSty').addEventListener('input', e => {   // darf negativ sein
+  const v = parseFloat(e.target.value); if (!isFinite(v) || v <= -90) return;
+  targetsFor(pageGroup()).forEach(p => { p.sy = v; });
+  draw(); drawAllThumbs();
+});
+['gScale', 'gSty'].forEach(id => $(id).addEventListener('change', () => syncUI()));
 
 // Maus auf einer der beiden Seiten: verschieben oder (im Rechteck-Modus) Rechteck aufziehen
 let drag = null;
@@ -1014,8 +1016,8 @@ function clonePage(p, name) {
 }
 // Eingefrorene Kopie einer Seite als Quelle für ein ausgeschnittenes Stück (inkl. globaler Werte)
 function snapshotOf(p) {
-  return { src: p.src, prev: p.prev, rot: p.rot, q: p.q, dx: p.dx, dy: p.dy, k: p.k, aspect: p.aspect,
-           layers: p.layers.map(cloneLayer), G: { ...(p.G || G) } };
+  return { src: p.src, prev: p.prev, rot: p.rot, q: p.q, dx: p.dx, dy: p.dy, k: p.k, sy: p.sy || 0, aspect: p.aspect,
+           layers: p.layers.map(cloneLayer) };
 }
 
 function updateTools() {
@@ -1107,8 +1109,6 @@ document.addEventListener('keydown', e => {
   if (m && pages[cur]) { e.preventDefault(); shift(m[0], m[1]); }
 });
 
-const gIn = (id, key) => $(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (isFinite(v)) { G[key] = key === 'scale' ? Math.max(10, v) : v; draw(); drawAllThumbs(); } });
-gIn('gScale', 'scale'); gIn('gSty', 'sty');   // Breite folgt aus «Grösse», «Höhe zusätzlich» darf negativ sein
 
 // Automatik sperrt die Oberfläche (Overlay), bis sie fertig ist
 const withBusy = fn => () => {
@@ -1117,7 +1117,7 @@ const withBusy = fn => () => {
   setTimeout(() => { try { fn(); } finally { setBusy(false); syncUI(); draw(); drawAllThumbs(); } }, 50);
 };
 $('aAll').onclick = withBusy(() => { autoAll(0); setStatus('Automatik angewendet.'); });
-// Menü: Seitenauswahl aus dem Umschalter; bei «Alle» setzt «Grösse» den gemeinsamen Faktor
+// Menü: Seitenauswahl aus dem Umschalter
 const autoGroup = () => { const b = document.querySelector('#aSeg .on'); return b ? b.dataset.g : 'all'; };
 const autoList = g => g === 'all' ? pages : targetsFor(g);
 $('aAllG').onclick = withBusy(() => {
@@ -1149,7 +1149,7 @@ document.querySelectorAll('.split').forEach(root => {
 });
 
 // Zurücksetzen, aufgebaut wie die Automatik (Rechtecke, Teilungen und Stücke bleiben):
-// Drehung = fein + 90°, Grösse = pro Seite (bei «Alle» auch der gemeinsame Faktor), Ausrichtung = Verschiebung
+// Drehung = fein + 90°, Grösse = Grösse und Höhe zusätzlich, Ausrichtung = Verschiebung
 const GROUP = { all: 'Alle Seiten', sel: 'Markierte Seiten', odd: 'Ungerade Seiten', even: 'Gerade Seiten' };
 const WHAT = { all: 'alles', rot: 'Drehung', size: 'Grösse', pos: 'Ausrichtung' };
 function resetPages(g, what) {
@@ -1157,10 +1157,9 @@ function resetPages(g, what) {
   const any = k => what === 'all' || what === k;
   t.forEach(p => {
     if (any('rot')) { p.rot = 0; p.q = 0; }
-    if (any('size')) p.k = 1;
+    if (any('size')) { p.k = 1; p.sy = 0; }
     if (any('pos')) { p.dx = 0; p.dy = 0; }
   });
-  if (g === 'all' && any('size')) { G.scale = 100; G.stx = 0; G.sty = 0; }
   syncUI(); draw(); drawAllThumbs();
   setStatus(`Zurückgesetzt: ${GROUP[g]}, ${WHAT[what]} (${t.length}).`);
 }
@@ -1172,7 +1171,7 @@ document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => resetPa
 function blankPage() {
   const c = document.createElement('canvas'); c.width = 420; c.height = 594;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
+  return { name: 'Leere Seite', src: { kind: 'blank' }, prev: c, rot: 0, q: 0, dx: 0, dy: 0, k: 1, sy: 0, layers: [], aspect: c.height / c.width, ink: new Float32Array(0), thumb: null };
 }
 $('bDup').onclick = () => {
   const src = targetsFor('sel'); if (!src.length) return;
